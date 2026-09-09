@@ -36,14 +36,17 @@ jobs:
           ANDROID_JAR=$ANDROID_HOME/platforms/android-21/android.jar
           mkdir -p out
           javac -cp $ANDROID_JAR -source 1.8 -target 1.8 -d out \
-            YouTubeApplication.java FileProvider.java
+            YouTubeApplication.java \
+            FileProvider.java \
+            YouTubeSuggestionProvider.java
 
       - name: Convert .class to .dex using d8
         run: |
           D8=$ANDROID_HOME/build-tools/34.0.0/d8
           $D8 --lib $ANDROID_HOME/platforms/android-21/android.jar --output . \
             out/com/google/android/apps/youtube/app/YouTubeApplication.class \
-            out/android/support/v4/content/FileProvider.class
+            out/android/support/v4/content/FileProvider.class \
+            out/com/google/android/apps/youtube/app/suggest/YouTubeSuggestionProvider.class
 
       - name: Upload DEX artifact
         uses: actions/upload-artifact@v4
