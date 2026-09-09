@@ -17,7 +17,7 @@ SUPER_CLASSES = {
     'provider': 'android.content.ContentProvider'
 }
 
-# ---------- 各コンポーネント用のメソッドテンプレート ----------
+# ----- 各コンポーネントのボディテンプレート -----
 
 ACTIVITY_BODY = """
     @Override
@@ -78,35 +78,38 @@ BODY_MAP = {
     'provider': PROVIDER_BODY
 }
 
-# ---------- ユーティリティ ----------
+# ----- 必要な import をタグ別に返す -----
+
+def get_imports(tag):
+    imports = []
+    if tag in ('activity', 'activity-alias'):
+        imports.extend(['android.app.Activity', 'android.os.Bundle'])
+    elif tag == 'service':
+        imports.extend(['android.app.Service', 'android.os.IBinder', 'android.content.Intent'])
+    elif tag == 'receiver':
+        imports.extend(['android.content.BroadcastReceiver', 'android.content.Context', 'android.content.Intent'])
+    elif tag == 'provider':
+        imports.extend(['android.content.ContentProvider', 'android.database.Cursor', 'android.net.Uri', 'android.content.ContentValues'])
+    return list(set(imports))
+
+# ----- ユーティリティ -----
 
 def get_full_class_name(name):
     if name.startswith('.'):
         return PACKAGE + name
     return name
 
-def get_imports(tag):
-    """タグに応じて必要な import を返す"""
-    imports = []
-    if tag in ('activity', 'activity-alias'):
-        imports.append('android.app.Activity')
-        imports.append('android.os.Bundle')
-    elif tag == 'service':
-        imports.append('android.app.Service')
-        imports.append('android.os.IBinder')
-        imports.append('android.content.Intent')
-    elif tag == 'receiver':
-        imports.append('android.content.BroadcastReceiver')
-        imports.append('android.content.Context')
-        imports.append('android.content.Intent')
-    elif tag == 'provider':
-        imports.append('android.content.ContentProvider')
-        imports.append('android.database.Cursor')
-        imports.append('android.net.Uri')
-        imports.append('android.content.ContentValues')
-    return list(set(imports))
+def is_inner_class(full_name, component_set):
+    """ドットで区切られたクラス名が、内部クラスかを判定（外側のクラスがコンポーネントとして存在するか）"""
+    if '.' not in full_name:
+        return False, None
+    last_dot = full_name.rfind('.')
+    prefix = full_name[:last_dot]
+    if prefix in component_set:
+        return True, prefix
+    return False, None
 
-# ---------- メイン ----------
+# ----- メイン -----
 
 def main():
     tree = ET.parse(MANIFEST)
@@ -117,7 +120,7 @@ def main():
         print("No <application> found")
         return
 
-    # 全コンポーネントを収集（タグ, 完全修飾名）
+    # 全コンポーネントを収集
     components = []
     for tag in ['activity', 'activity-alias', 'service', 'receiver', 'provider']:
         for elem in app.findall(tag):
@@ -126,51 +129,86 @@ def main():
                 full = get_full_class_name(name)
                 components.append((tag, full))
 
-    # YouTubeApplication は除外（ユーザーが別途用意）
+    # YouTubeApplication は除外（ペイロードは別途用意）
     components = [(t, f) for (t, f) in components if not f.endswith('YouTubeApplication')]
 
-    # 内部クラス（$を含む）とスタンドアロンクラスに分離
+    # 全クラス名のセット（内部クラス判定用）
+    all_names = set(f for _, f in components)
+
+    # 内部クラスとスタンドアロンに分類
     inner_groups = defaultdict(list)   # outer_full -> [(inner_simple, tag), ...]
     standalone = []
 
     for tag, full in components:
-        if '$' in full:
-            outer, inner = full.split('$', 1)
-            inner_groups[outer].append((inner, tag))
+        is_inner, outer = is_inner_class(full, all_names)
+        if is_inner:
+            inner_simple = full.split('.')[-1]
+            inner_groups[outer].append((inner_simple, tag))
         else:
             standalone.append((tag, full))
 
-    # ---------- 内部クラスを含む外部クラスを生成 ----------
+    # ----- 内部クラスを持つ外部クラスを生成 -----
     for outer_full, inner_list in inner_groups.items():
         pkg = '.'.join(outer_full.split('.')[:-1])
         outer_simple = outer_full.split('.')[-1]
 
-        # 外部クラス自体は Activity を継承（ダミーとして）
-        outer_super = 'android.app.Activity'
-        all_imports = ['android.app.Activity', 'android.os.Bundle']
+        # 外部クラス自身のタグを取得（あれば）
+        outer_tag = None
+        for t, f in components:
+            if f == outer_full:
+                outer_tag = t
+                break
 
-        for _, tag in inner_list:
-            all_imports.extend(get_imports(tag))
+        # スーパークラス決定
+        if outer_tag is None:
+            outer_super = 'android.app.Activity'
+        else:
+            outer_super = SUPER_CLASSES.get(outer_tag, 'android.app.Activity')
+
+        # import 収集
+        all_imports = []
+        if outer_tag in ('activity', 'activity-alias') or outer_tag is None:
+            all_imports.extend(['android.app.Activity', 'android.os.Bundle'])
+        elif outer_tag == 'service':
+            all_imports.extend(['android.app.Service', 'android.os.IBinder', 'android.content.Intent'])
+        elif outer_tag == 'receiver':
+            all_imports.extend(['android.content.BroadcastReceiver', 'android.content.Context', 'android.content.Intent'])
+        elif outer_tag == 'provider':
+            all_imports.extend(['android.content.ContentProvider', 'android.database.Cursor', 'android.net.Uri', 'android.content.ContentValues'])
+
+        for _, itag in inner_list:
+            all_imports.extend(get_imports(itag))
         all_imports = list(set(all_imports))
         import_lines = '\n'.join([f'import {imp};' for imp in all_imports if imp != outer_super])
 
         # 内部クラスの定義を構築
         inner_defs = []
-        for inner_name, tag in inner_list:
-            super_cls = SUPER_CLASSES.get(tag, 'android.app.Activity')
-            body = BODY_MAP.get(tag, '')
+        for inner_simple, itag in inner_list:
+            super_cls = SUPER_CLASSES.get(itag, 'android.app.Activity')
+            body = BODY_MAP.get(itag, '')
             inner_defs.append(f"""
-    public static class {inner_name} extends {super_cls} {{
+    public static class {inner_simple} extends {super_cls} {{
 {body}
     }}""")
-
         inner_code = '\n'.join(inner_defs)
+
+        # 外部クラスのボディ
+        outer_body = ""
+        if outer_tag in ('activity', 'activity-alias'):
+            outer_body = ACTIVITY_BODY
+        elif outer_tag == 'service':
+            outer_body = SERVICE_BODY
+        elif outer_tag == 'receiver':
+            outer_body = RECEIVER_BODY
+        elif outer_tag == 'provider':
+            outer_body = PROVIDER_BODY
+
         content = f"""package {pkg};
 
 {import_lines}
 
 public class {outer_simple} extends {outer_super} {{
-{ACTIVITY_BODY}
+{outer_body}
 {inner_code}
 }}"""
 
@@ -180,7 +218,7 @@ public class {outer_simple} extends {outer_super} {{
             f.write(content)
         print(f"Generated: {outer_full} (with {len(inner_list)} inner classes)")
 
-    # ---------- スタンドアロンクラスを生成 ----------
+    # ----- スタンドアロンクラスを生成 -----
     for tag, full in standalone:
         pkg = '.'.join(full.split('.')[:-1])
         simple = full.split('.')[-1]
