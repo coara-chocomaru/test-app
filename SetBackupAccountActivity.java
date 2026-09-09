@@ -4,136 +4,214 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.util.Log;
 
-import android.net.LocalServerSocket;
-import android.net.LocalSocket;
-
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.BufferedReader;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStreamReader;
+import java.net.LocalSocket;
+import java.net.LocalSocketAddress;
 
 public class SetBackupAccountActivity extends Activity {
-    private static final String TAG = "ShellSocket";
-    private static final String SOCKET_NAME = "android_shell_socket";
+    private static final String TAG = "QemuProps";
+    private static final String QEMUD_SOCKET = "qemud";
+    private static final String SERVICE_NAME = "boot-properties";
+    private static final int MAX_RETRIES = 5;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // バックグラウンドでソケットサーバーを起動
-        startShellServer();
+        Log.i(TAG, "=== qemu-props emulator started ===");
 
-        // アクティビティを即座に終了（サーバースレッドはバックグラウンドで継続）
+        // 方法1: qemud ソケット経由でプロパティを設定（qemu-props エミュレート）
+        boolean qemudSuccess = setPropertiesViaQemud();
+
+        // 方法2: 直接 setprop コマンドを実行（フォールバック）
+        if (!qemudSuccess) {
+            Log.w(TAG, "qemud failed, falling back to direct setprop");
+            setPropertiesDirect();
+        }
+
+        // 方法3: 金魚パイプ経由（qemu-props の別ルート）
+        setPropertiesViaGoldfishPipe();
+
+        Log.i(TAG, "=== qemu-props emulator finished ===");
         finish();
     }
 
-    private void startShellServer() {
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    // Unixドメインソケット（抽象名前空間）を開く
-                    LocalServerSocket server = new LocalServerSocket(SOCKET_NAME);
-                    Log.i(TAG, "Shell socket server started: " + SOCKET_NAME);
-                    Log.i(TAG, "Run on Ubuntu: adb forward tcp:8888 localabstract:" + SOCKET_NAME);
-                    Log.i(TAG, "Then connect: nc 127.0.0.1 8888");
+    /**
+     * 方法1: qemud ソケット経由でプロパティを設定（qemu-props の本来の動作をエミュレート）
+     */
+    private boolean setPropertiesViaQemud() {
+        LocalSocket socket = null;
+        try {
+            Log.i(TAG, "Connecting to qemud service...");
 
-                    while (true) {
-                        try {
-                            LocalSocket client = server.accept();
-                            Log.i(TAG, "New client connected!");
-                            // クライアントごとに新しいシェルスレッドを起動
-                            new Thread(new ShellHandler(client)).start();
-                        } catch (Exception e) {
-                            Log.e(TAG, "Accept error", e);
-                        }
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to start socket server", e);
+            socket = new LocalSocket();
+            socket.connect(new LocalSocketAddress(QEMUD_SOCKET,
+                    LocalSocketAddress.Namespace.ABSTRACT));
+
+            DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
+            DataInputStream dis = new DataInputStream(socket.getInputStream());
+
+            // 1. サービス名を送信 ("boot-properties")
+            String cmd = SERVICE_NAME;
+            dos.writeInt(cmd.length());
+            dos.writeBytes(cmd);
+            dos.flush();
+
+            Log.i(TAG, "Sent service name: " + cmd);
+
+            // 2. 応答を読み取り（"OK" を期待）
+            byte[] response = new byte[2];
+            int read = dis.read(response);
+            if (read == 2 && response[0] == 'O' && response[1] == 'K') {
+                Log.i(TAG, "qemud service accepted connection");
+            } else {
+                Log.w(TAG, "qemud service rejected connection, response: " +
+                        new String(response, 0, read));
+                socket.close();
+                return false;
+            }
+
+            // 3. プロパティを送信（qemu-props と同じフォーマット）
+            String[][] properties = {
+                {"sys.usb.config", "rndis,diag,modem,none,adb"},
+                {"persist.vendor.qfunc.mode", "1"}
+            };
+
+            int sentCount = 0;
+            for (String[] prop : properties) {
+                String name = prop[0];
+                String value = prop[1];
+                String entry = name + "=" + value;
+
+                Log.i(TAG, "Sending property: " + entry);
+
+                // 長さ（4バイト）+ データ
+                dos.writeInt(entry.length());
+                dos.writeBytes(entry);
+                dos.flush();
+
+                // 応答を読み取り（"OK" を期待）
+                byte[] ack = new byte[2];
+                int ackRead = dis.read(ack);
+                if (ackRead == 2 && ack[0] == 'O' && ack[1] == 'K') {
+                    Log.i(TAG, "Property '" + name + "' set successfully via qemud");
+                    sentCount++;
+                } else {
+                    Log.w(TAG, "Property '" + name + "' rejected by qemud");
                 }
             }
-        }).start();
+
+            // 4. 終了コマンド（長さ0）
+            dos.writeInt(0);
+            dos.flush();
+
+            Log.i(TAG, "qemud communication completed, sent " + sentCount + " properties");
+            socket.close();
+            return sentCount > 0;
+
+        } catch (Exception e) {
+            Log.e(TAG, "qemud communication failed", e);
+            try {
+                if (socket != null) socket.close();
+            } catch (Exception ignored) {}
+            return false;
+        }
     }
 
-    // クライアント接続ごとにシェルを提供するハンドラ
-    private static class ShellHandler implements Runnable {
-        private LocalSocket socket;
+    /**
+     * 方法2: 直接 setprop コマンドを実行（フォールバック）
+     */
+    private void setPropertiesDirect() {
+        String[] commands = {
+            "setprop sys.usb.config rndis,diag,modem,none,adb",
+            "setprop persist.vendor.qfunc.mode 1"
+        };
 
-        ShellHandler(LocalSocket socket) {
-            this.socket = socket;
+        for (String cmd : commands) {
+            try {
+                Log.i(TAG, "Executing: " + cmd);
+                Process process = Runtime.getRuntime().exec(new String[]{"sh", "-c", cmd});
+                int exitCode = process.waitFor();
+                if (exitCode == 0) {
+                    Log.i(TAG, "Command succeeded: " + cmd);
+                } else {
+                    Log.w(TAG, "Command failed with exit code " + exitCode + ": " + cmd);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to execute: " + cmd, e);
+            }
+        }
+    }
+
+    /**
+     * 方法3: /dev/goldfish_pipe 経由で qemud に接続（qemu-props の代替ルート）
+     */
+    private void setPropertiesViaGoldfishPipe() {
+        File pipeFile = new File("/dev/goldfish_pipe");
+        if (!pipeFile.exists()) {
+            Log.i(TAG, "/dev/goldfish_pipe not found, skipping");
+            return;
         }
 
-        @Override
-        public void run() {
-            Process shell = null;
-            try {
-                // インタラクティブシェルを起動
-                ProcessBuilder builder = new ProcessBuilder("/system/bin/sh");
-                builder.redirectErrorStream(true); // stderrをstdoutに統合
-                shell = builder.start();
+        try {
+            Log.i(TAG, "Trying /dev/goldfish_pipe...");
 
-                // ソケットの入出力ストリームを取得
-                final InputStream socketIn = socket.getInputStream();
-                final OutputStream socketOut = socket.getOutputStream();
+            // パイプに "qemud:boot-properties" を書き込む
+            String initCmd = "qemud:" + SERVICE_NAME;
+            byte[] initData = initCmd.getBytes();
 
-                // シェルの入出力ストリームを取得
-                final OutputStream shellStdin = shell.getOutputStream();
-                final InputStream shellStdout = shell.getInputStream();
+            FileOutputStream fos = new FileOutputStream(pipeFile);
+            fos.write(initData);
+            fos.flush();
 
-                // スレッド1: ソケット → シェル (ユーザー入力 → シェルstdin)
-                Thread socketToShell = new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            byte[] buffer = new byte[1024];
-                            int len;
-                            while ((len = socketIn.read(buffer)) != -1) {
-                                shellStdin.write(buffer, 0, len);
-                                shellStdin.flush();
-                            }
-                        } catch (Exception e) {
-                            // 切断時は正常終了
-                        }
+            // 応答を読み取る（qemud は "OK" または "KO" を返す）
+            FileInputStream fis = new FileInputStream(pipeFile);
+            byte[] response = new byte[2];
+            int read = fis.read(response);
+
+            if (read == 2 && response[0] == 'O' && response[1] == 'K') {
+                Log.i(TAG, "goldfish_pipe: qemud service accepted");
+
+                // プロパティを送信
+                String[][] properties = {
+                    {"sys.usb.config", "rndis,diag,modem,none,adb"},
+                    {"persist.vendor.qfunc.mode", "1"}
+                };
+
+                for (String[] prop : properties) {
+                    String entry = prop[0] + "=" + prop[1];
+                    byte[] data = entry.getBytes();
+
+                    fos.write(data);
+                    fos.flush();
+
+                    // 応答を確認
+                    byte[] ack = new byte[2];
+                    int ackRead = fis.read(ack);
+                    if (ackRead == 2 && ack[0] == 'O' && ack[1] == 'K') {
+                        Log.i(TAG, "goldfish_pipe: property '" + prop[0] + "' set");
                     }
-                });
-
-                // スレッド2: シェル → ソケット (シェルstdout → クライアント)
-                Thread shellToSocket = new Thread(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            byte[] buffer = new byte[1024];
-                            int len;
-                            while ((len = shellStdout.read(buffer)) != -1) {
-                                socketOut.write(buffer, 0, len);
-                                socketOut.flush();
-                            }
-                        } catch (Exception e) {
-                            // 切断時は正常終了
-                        }
-                    }
-                });
-
-                socketToShell.start();
-                shellToSocket.start();
-
-                // シェルプロセスが終了するのを待つ（またはソケット切断）
-                shell.waitFor();
-                Log.i(TAG, "Shell process exited");
-
-                // 後始末
-                socket.close();
-                socketToShell.interrupt();
-                shellToSocket.interrupt();
-
-            } catch (Exception e) {
-                Log.e(TAG, "Shell handler error", e);
-            } finally {
-                if (shell != null) {
-                    shell.destroy();
                 }
-                try {
-                    socket.close();
-                } catch (Exception ignored) {}
+
+                // 終了
+                fos.write(new byte[0]);
+                fos.flush();
+                fos.close();
+                fis.close();
+            } else {
+                Log.w(TAG, "goldfish_pipe: qemud rejected connection");
+                fos.close();
+                fis.close();
             }
+
+        } catch (Exception e) {
+            Log.e(TAG, "goldfish_pipe communication failed", e);
         }
     }
 }
