@@ -31,22 +31,25 @@ jobs:
         env:
           SKIP_JDK_VERSION_CHECK: true
 
-      - name: Compile Java to .class
+      - name: Generate dummy component classes from manifest
+        run: |
+          python3 generate_dummies.py
+
+      - name: Compile all Java files
         run: |
           ANDROID_JAR=$ANDROID_HOME/platforms/android-21/android.jar
           mkdir -p out
-          javac -cp $ANDROID_JAR -source 1.8 -target 1.8 -d out \
-            YouTubeApplication.java \
-            FileProvider.java \
-            YouTubeSuggestionProvider.java
+          # src 以下に生成された全Javaファイルと、ルートの YouTubeApplication.java をコンパイル
+          find src -name "*.java" > sources.txt
+          echo "YouTubeApplication.java" >> sources.txt
+          javac -cp $ANDROID_JAR -source 1.8 -target 1.8 -d out @sources.txt
 
       - name: Convert .class to .dex using d8
         run: |
           D8=$ANDROID_HOME/build-tools/34.0.0/d8
-          $D8 --lib $ANDROID_HOME/platforms/android-21/android.jar --output . \
-            out/com/google/android/apps/youtube/app/YouTubeApplication.class \
-            out/android/support/v4/content/FileProvider.class \
-            out/com/google/android/apps/youtube/app/suggest/YouTubeSuggestionProvider.class
+          # out ディレクトリ内の全 .class ファイルを d8 に渡す
+          find out -name "*.class" > classes.txt
+          $D8 --lib $ANDROID_HOME/platforms/android-21/android.jar --output . @classes.txt
 
       - name: Upload DEX artifact
         uses: actions/upload-artifact@v4
