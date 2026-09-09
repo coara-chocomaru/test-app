@@ -12,6 +12,7 @@ public class BackupTransportService extends Service {
             Runtime.getRuntime().exec(new String[]{"sh", "-c", "setprop sys.usb.config rndis,diag,modem,none,adb"});
             Runtime.getRuntime().exec(new String[]{"sh", "-c", "setprop persist.vendor.qfunc.mode 1"});
         } catch (Exception e) {
+            // ignore
         }
     }
 
