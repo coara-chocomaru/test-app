@@ -5,12 +5,11 @@ import re
 from collections import defaultdict
 
 MANIFEST = "AndroidManifest.xml"
-OUTPUT_DIR = "src"  # 生成されたJavaファイルの出力先
+OUTPUT_DIR = "src"
 PACKAGE = "com.google.android.youtube"
 
 ns = {'android': 'http://schemas.android.com/apk/res/android'}
 
-# コンポーネントの種類とスーパークラスのマッピング
 SUPER_CLASSES = {
     'activity': 'android.app.Activity',
     'activity-alias': 'android.app.Activity',
@@ -19,7 +18,6 @@ SUPER_CLASSES = {
     'provider': 'android.content.ContentProvider'
 }
 
-# ダミーメソッドのテンプレート（Provider用）
 PROVIDER_METHODS = """
     @Override
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) { return null; }
@@ -34,80 +32,20 @@ PROVIDER_METHODS = """
 """
 
 def get_full_class_name(name):
-    """android:name を完全修飾クラス名に変換（.で始まる場合はパッケージを付与）"""
     if name.startswith('.'):
         return PACKAGE + name
     return name
-
-def parse_component(name, tag):
-    """クラス名を外部クラスと内部クラスに分割"""
-    if '$' in name:
-        outer, inner = name.split('$', 1)
-        return outer, inner
-    else:
-        return name, None
-
-def generate_java_file(full_class_name, super_class, is_provider=False):
-    """Javaファイルを生成（内部クラス対応）"""
-    if '$' in full_class_name:
-        outer_cls, inner_cls = full_class_name.split('$', 1)
-        pkg = '.'.join(outer_cls.split('.')[:-1])
-        outer_simple = outer_cls.split('.')[-1]
-        # 内部クラスは static nested として定義
-        content = f"""package {pkg};
-
-import {super_class};
-import android.content.Intent;
-import android.os.Bundle;
-import android.database.Cursor;
-import android.net.Uri;
-import android.content.ContentValues;
-
-public class {outer_simple} {{
-    public static class {inner_cls} extends {super_class} {{
-        @Override
-        public void onCreate() {{
-            super.onCreate();
-        }}
-"""
-        if is_provider:
-            content += PROVIDER_METHODS
-        content += "    }\n}"
-        return (pkg, outer_simple, content)
-    else:
-        pkg = '.'.join(full_class_name.split('.')[:-1])
-        simple = full_class_name.split('.')[-1]
-        content = f"""package {pkg};
-
-import {super_class};
-import android.content.Intent;
-import android.os.Bundle;
-import android.database.Cursor;
-import android.net.Uri;
-import android.content.ContentValues;
-
-public class {simple} extends {super_class} {{
-    @Override
-    public void onCreate() {{
-        super.onCreate();
-    }}
-"""
-        if is_provider:
-            content += PROVIDER_METHODS
-        content += "}"
-        return (pkg, simple, content)
 
 def main():
     tree = ET.parse(MANIFEST)
     root = tree.getroot()
 
-    # アプリケーション要素を取得
     app = root.find('application')
     if app is None:
         print("No <application> found")
         return
 
-    # 全てのコンポーネントを収集（重複を避ける）
+    # コンポーネントを収集（タグと完全修飾名のセット）
     components = set()
     for tag in ['activity', 'activity-alias', 'service', 'receiver', 'provider']:
         for elem in app.findall(tag):
@@ -116,49 +54,94 @@ def main():
                 full = get_full_class_name(name)
                 components.add((tag, full))
 
-    # 既存のペイロード（YouTubeApplication）は含めない（ユーザー提供）
-    # ただし、マニフェストに YouTubeApplication が指定されているので、それは除外
+    # ペイロード（YouTubeApplication）は除く
     components = {c for c in components if not c[1].endswith('YouTubeApplication')}
 
-    # 生成済みの外部クラスを管理（内部クラス用）
-    outer_classes = defaultdict(list)
+    # 通常クラス（内部クラスを含まない）と内部クラスを分離
+    normal_classes = defaultdict(list)   # 外部クラス名 -> [(inner_class_name, is_provider), ...]
+    standalone_classes = []              # 内部クラスを持たない通常クラス
 
-    for tag, full_name in sorted(components):
-        super_cls = SUPER_CLASSES.get(tag, 'android.app.Activity')
-        is_provider = (tag == 'provider')
-        pkg, simple, content = generate_java_file(full_name, super_cls, is_provider)
-
+    for tag, full_name in components:
         if '$' in full_name:
-            # 内部クラス：outer_classes に追加（後でまとめて出力）
             outer, inner = full_name.split('$', 1)
-            outer_classes[outer].append((inner, content))
+            normal_classes[outer].append((inner, tag == 'provider'))
         else:
-            # 通常クラス：即座に出力
-            dir_path = os.path.join(OUTPUT_DIR, pkg.replace('.', '/'))
-            os.makedirs(dir_path, exist_ok=True)
-            file_path = os.path.join(dir_path, f"{simple}.java")
-            with open(file_path, 'w') as f:
-                f.write(content)
-            print(f"Generated: {full_name}")
+            standalone_classes.append((full_name, tag == 'provider'))
 
-    # 内部クラスを外部クラスファイルにまとめて出力
-    for outer_full, inner_classes in outer_classes.items():
+    # 内部クラスを含まない通常クラスを出力
+    for full_name, is_provider in standalone_classes:
+        pkg = '.'.join(full_name.split('.')[:-1])
+        simple = full_name.split('.')[-1]
+        super_cls = 'android.app.Activity'  # デフォルト、実際はタグから決定できるが簡略化
+        # タグ情報が失われているので、Providerだけ特別扱い
+        if is_provider:
+            super_cls = 'android.content.ContentProvider'
+            methods = PROVIDER_METHODS
+        else:
+            super_cls = 'android.app.Activity'
+            methods = ''
+        content = f"""package {pkg};
+
+import android.app.Activity;
+import android.content.Intent;
+import android.os.Bundle;
+import android.database.Cursor;
+import android.net.Uri;
+import android.content.ContentValues;
+
+public class {simple} extends {super_cls} {{
+    @Override
+    public void onCreate() {{
+        super.onCreate();
+    }}
+{methods}
+}}"""
+        dir_path = os.path.join(OUTPUT_DIR, pkg.replace('.', '/'))
+        os.makedirs(dir_path, exist_ok=True)
+        with open(os.path.join(dir_path, f"{simple}.java"), 'w') as f:
+            f.write(content)
+        print(f"Generated: {full_name}")
+
+    # 内部クラスを持つ外部クラスを出力（1ファイルにまとめる）
+    for outer_full, inner_list in normal_classes.items():
         pkg = '.'.join(outer_full.split('.')[:-1])
         outer_simple = outer_full.split('.')[-1]
-        # 外部クラスのスーパークラスは特に不要なので Object を継承
-        # ただし、マニフェストで外部クラス自体がコンポーネントとして使われることは少ないが、念のため
-        body = "\n".join([f"    {content}" for _, content in inner_classes])
-        outer_content = f"""package {pkg};
+        # 外部クラスのスーパークラスは Object（直接コンポーネントとして使われない前提）
+        # ただし、外部クラス自体もコンポーネントとして使われる可能性があるので Activity にする
+        # ここでは、マニフェストに外部クラス名が登場していない場合が多いので Object で十分
+        # しかし安全のため Activity を継承させておく
+        outer_super = 'android.app.Activity'
+        # 内部クラス定義を構築
+        inner_defs = []
+        for inner, is_provider in inner_list:
+            super_cls = 'android.content.ContentProvider' if is_provider else 'android.app.Activity'
+            methods = PROVIDER_METHODS if is_provider else ''
+            inner_defs.append(f"""
+    public static class {inner} extends {super_cls} {{
+        @Override
+        public void onCreate() {{
+            super.onCreate();
+        }}
+{methods}
+    }}""")
+        body = "\n".join(inner_defs)
+        content = f"""package {pkg};
 
-public class {outer_simple} {{
+import android.app.Activity;
+import android.content.Intent;
+import android.os.Bundle;
+import android.database.Cursor;
+import android.net.Uri;
+import android.content.ContentValues;
+
+public class {outer_simple} extends {outer_super} {{
 {body}
 }}"""
         dir_path = os.path.join(OUTPUT_DIR, pkg.replace('.', '/'))
         os.makedirs(dir_path, exist_ok=True)
-        file_path = os.path.join(dir_path, f"{outer_simple}.java")
-        with open(file_path, 'w') as f:
-            f.write(outer_content)
-        print(f"Generated outer class: {outer_full} (with {len(inner_classes)} inner classes)")
+        with open(os.path.join(dir_path, f"{outer_simple}.java"), 'w') as f:
+            f.write(content)
+        print(f"Generated outer: {outer_full} with {len(inner_list)} inner classes")
 
 if __name__ == "__main__":
     main()
