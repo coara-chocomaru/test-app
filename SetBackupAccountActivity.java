@@ -3,7 +3,6 @@ package com.google.android.backup;
 import android.app.Activity;
 import android.os.Bundle;
 import android.util.Log;
-
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
