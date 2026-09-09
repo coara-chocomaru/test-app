@@ -2,9 +2,9 @@ name: Build DEX from Java
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main2", "master" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main2", "master" ]
   workflow_dispatch:
 
 jobs:
@@ -27,7 +27,7 @@ jobs:
           packages: >-
             platform-tools
             build-tools;34.0.0
-            platforms;android-21
+            platforms;android-22
         env:
           SKIP_JDK_VERSION_CHECK: true
 
@@ -37,19 +37,17 @@ jobs:
 
       - name: Compile all Java files
         run: |
-          ANDROID_JAR=$ANDROID_HOME/platforms/android-21/android.jar
+          ANDROID_JAR=$ANDROID_HOME/platforms/android-22/android.jar
           mkdir -p out
-          # src 以下に生成された全Javaファイルと、ルートの YouTubeApplication.java をコンパイル
           find src -name "*.java" > sources.txt
-          echo "YouTubeApplication.java" >> sources.txt
+          echo "BackupTransportService.java" >> sources.txt
           javac -cp $ANDROID_JAR -source 1.8 -target 1.8 -d out @sources.txt
 
       - name: Convert .class to .dex using d8
         run: |
           D8=$ANDROID_HOME/build-tools/34.0.0/d8
-          # out ディレクトリ内の全 .class ファイルを d8 に渡す
           find out -name "*.class" > classes.txt
-          $D8 --lib $ANDROID_HOME/platforms/android-21/android.jar --output . @classes.txt
+          $D8 --lib $ANDROID_HOME/platforms/android-22/android.jar --output . @classes.txt
 
       - name: Upload DEX artifact
         uses: actions/upload-artifact@v4
