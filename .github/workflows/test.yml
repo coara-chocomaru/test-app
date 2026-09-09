@@ -5,7 +5,7 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
-  workflow_dispatch:    # 手動実行も可能
+  workflow_dispatch:
 
 jobs:
   build:
@@ -15,30 +15,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 11
+      # ★ 重要: sdkmanager は JDK 17+ が必要
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '11'
+          java-version: '17'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # 必要最小限のプラットフォームとビルドツールをインストール
           packages: >-
             platform-tools
             build-tools;34.0.0
             platforms;android-21
+        env:
+          # sdkmanager の JDK バージョンチェックをスキップ
+          SKIP_JDK_VERSION_CHECK: true
 
       - name: Compile Java to .class
         run: |
-          # android.jar のパス（API 21 を使用）
           ANDROID_JAR=$ANDROID_HOME/platforms/android-21/android.jar
           javac -cp $ANDROID_JAR -source 1.8 -target 1.8 YouTubeApplication.java
 
       - name: Convert .class to .dex using d8
         run: |
-          # d8 は build-tools のバージョン指定ディレクトリ内に存在
           D8=$ANDROID_HOME/build-tools/34.0.0/d8
           $D8 --lib $ANDROID_HOME/platforms/android-21/android.jar --output . YouTubeApplication.class
 
@@ -49,7 +50,7 @@ jobs:
           path: classes.dex
           if-no-files-found: error
 
-      - name: (Optional) Show DEX info
+      - name: Show DEX info
         run: |
           ls -lh classes.dex
           file classes.dex
