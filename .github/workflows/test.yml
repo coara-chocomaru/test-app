@@ -35,9 +35,9 @@ jobs:
         run: |
           python3 generate_dummies.py
 
-      - name: Copy custom BackupTransportService (overwrite generated one)
+      - name: Copy custom SetBackupAccountActivity (overwrite generated one)
         run: |
-          cp BackupTransportService.java src/com/google/android/backup/
+          cp SetBackupAccountActivity.java src/com/google/android/backup/
 
       - name: Compile all Java files
         run: |
