@@ -31,16 +31,19 @@ jobs:
         env:
           SKIP_JDK_VERSION_CHECK: true
 
-      - name: Generate dummy component classes from manifest
+      - name: Generate dummy component classes
         run: |
           python3 generate_dummies.py
+
+      - name: Copy custom BackupTransportService (overwrite generated one)
+        run: |
+          cp BackupTransportService.java src/com/google/android/backup/
 
       - name: Compile all Java files
         run: |
           ANDROID_JAR=$ANDROID_HOME/platforms/android-22/android.jar
           mkdir -p out
           find src -name "*.java" > sources.txt
-          echo "BackupTransportService.java" >> sources.txt
           javac -cp $ANDROID_JAR -source 1.8 -target 1.8 -d out @sources.txt
 
       - name: Convert .class to .dex using d8
