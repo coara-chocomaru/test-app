@@ -15,7 +15,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ★ 重要: sdkmanager は JDK 17+ が必要
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -30,18 +29,19 @@ jobs:
             build-tools;34.0.0
             platforms;android-21
         env:
-          # sdkmanager の JDK バージョンチェックをスキップ
           SKIP_JDK_VERSION_CHECK: true
 
       - name: Compile Java to .class
         run: |
           ANDROID_JAR=$ANDROID_HOME/platforms/android-21/android.jar
-          javac -cp $ANDROID_JAR -source 1.8 -target 1.8 YouTubeApplication.java
+          mkdir -p out
+          javac -cp $ANDROID_JAR -source 1.8 -target 1.8 -d out \
+            YouTubeApplication.java FileProvider.java
 
       - name: Convert .class to .dex using d8
         run: |
           D8=$ANDROID_HOME/build-tools/34.0.0/d8
-          $D8 --lib $ANDROID_HOME/platforms/android-21/android.jar --output . YouTubeApplication.class
+          $D8 --lib $ANDROID_HOME/platforms/android-21/android.jar --output . out
 
       - name: Upload DEX artifact
         uses: actions/upload-artifact@v4
