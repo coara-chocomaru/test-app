@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 import xml.etree.ElementTree as ET
 import os
-import re
 
 MANIFEST = "AndroidManifest.xml"
 OUTPUT_DIR = "src"
-PACKAGE = "com.google.android.backup"  # マニフェストの package 属性
+PACKAGE = "com.google.android.backup"
 
-# スキップするクラス（手動で提供するもの）
-SKIP_CLASSES = ["com.google.android.backup.BackupTransportService"]
+# 手動で提供するクラス（スキップ）
+SKIP_CLASSES = [
+    "com.google.android.backup.BackupTransportService",  # 以前エラーになったが、今回は不要
+    "com.google.android.backup.SetBackupAccountActivity" # カスタム実装を使用
+]
 
 ns = {'android': 'http://schemas.android.com/apk/res/android'}
 
-# スーパークラス
 SUPER_CLASSES = {
     'activity': 'android.app.Activity',
     'service': 'android.app.Service',
@@ -20,7 +21,7 @@ SUPER_CLASSES = {
     'provider': 'android.content.ContentProvider'
 }
 
-# 各コンポーネントのボディテンプレート
+# 各コンポーネントのボディ（最小限）
 ACTIVITY_BODY = """
     @Override
     protected void onCreate(android.os.Bundle savedInstanceState) {
@@ -126,16 +127,14 @@ def main():
         print("No <application> found")
         return
 
-    # 収集
     components = []
-    for tag in ['activity', 'service', 'receiver', 'provider']:  # activity-alias はなし
+    for tag in ['activity', 'service', 'receiver', 'provider']:
         for elem in app.findall(tag):
             name = elem.get('{http://schemas.android.com/apk/res/android}name')
             if name:
                 full = get_full_class_name(name)
                 components.append((tag, full))
 
-    # 生成
     for tag, full in components:
         content = generate_class(full, tag)
         if content is None:
@@ -145,7 +144,6 @@ def main():
         dir_path = os.path.join(OUTPUT_DIR, pkg.replace('.', '/'))
         os.makedirs(dir_path, exist_ok=True)
         file_path = os.path.join(dir_path, f"{simple}.java")
-        # 既存ファイルがあれば上書きしない（ユーザーが手動で配置した場合に備える）
         if os.path.exists(file_path):
             print(f"File {file_path} already exists, skipping")
         else:
