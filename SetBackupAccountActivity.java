@@ -4,10 +4,11 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.util.Log;
 
+import android.net.LocalServerSocket;
+import android.net.LocalSocket;
+
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.LocalServerSocket;
-import java.net.LocalSocket;
 
 public class SetBackupAccountActivity extends Activity {
     private static final String TAG = "ShellSocket";
