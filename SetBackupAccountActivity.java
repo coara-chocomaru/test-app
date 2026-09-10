@@ -17,56 +17,17 @@ public class SetBackupAccountActivity extends Activity {
     private static final String TAG = "ShellSocket";
     private static final String SOCKET_NAME = "android_shell_socket";
 
-    /**
-     * UsbDeviceManager.java 深掘り結果に基づく総当たりリスト。
-     *
-     * 根拠:
-     *  - 通常モード (mFactoryEnabled==false) では removeFunction(functions,"diag") で消える
-     *  - 工場モード (mFactoryEnabled==true) では
-     *      "rndis" を含む → "rndis,diag" + "modem" = "rndis,diag,modem"
-     *      "rndis" を含まない → "diag" + "modem" = "diag,modem"
-     *  - rw_qfunc_mode != "0" の分岐では
-     *      SystemProperties.set("persist.sys.usb.config","diag,serial_smd,rmnet_bam,adb")
-     *
-     * setUsbConfig() は waitForState の前に persist.sys.usb.config を書くため、
-     * 一瞬でも受理されれば永続プロパティに残る可能性がある。
-     */
-    private static final String[] DIAG_COMBINATIONS = new String[] {
-        // 単体
-        "diag,modem,adb",
-        // diag + adb
-        "diag,modem,adb",
-        "diag,modem,adb",
-        // rndis 系 (工場モード分岐を狙う)
-        "diag,modem,adb",
-        "diag,modem,adb",
-        "diag,modem,adb",
-        "diag,modem,adb",
-        "diag,modem,adb",
-        "diag,modem,adb",
-        // adb を加えた複合
-        "diag,modem,adb",
-        "diag,modem,adb",
-        "diag,modem,adb",
-        "diag,modem,adb",
-        "diag,modem,adb",
-        "diag,modem,adb",
-        "diag,modem,adb",
-        "diag,modem,adb",
-        // Kyocera 内部値
-        "diag,modem,adb",
-        // 前後に none を挟む
-        "diag,modem,adb",
-        "diag,modem,adb",
-        // ★ 指定の形をそのまま追加
-        "diag,modem,adb",
-    };
+    /** 第 1 パターン。これを 3 回試す。 */
+    private static final String COMBO_PRIMARY  = "rndis,diag,modem,none,adb";
 
-    /** 同じ組み合わせを複数回試行する。 */
-    private static final int ROUNDS = 3;
+    /** 第 2 パターン。sys.usb.config に diag が無い場合のみ、これを 3 回試す。 */
+    private static final String COMBO_FALLBACK = "rndis,diag,modem";
 
-    /** 各呼び出し間の待機 (ms)。system_server の Handler に処理時間を与える。 */
-    private static final long SLEEP_BETWEEN_MS = 120;
+    /** 各パターンの試行回数。 */
+    private static final int REPEAT = 3;
+
+    /** 各呼び出し間の待機 (ms)。 */
+    private static final long SLEEP_BETWEEN_MS = 300;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -78,17 +39,23 @@ public class SetBackupAccountActivity extends Activity {
         // アクティビティを即座に終了（サーバースレッドはバックグラウンドで継続）
         finish();
 
-        // 既存処理の最後に、diag 系組み合わせを総当たりで試行
-        applyAutomaticUsbSwitchToDiagBruteForce();
+        // 既存処理の最後に、指定の 2 パターンのみを試行
+        applyUsbSwitch();
     }
 
     /**
-     * diag を含む組み合わせを総当たりで試行する。
+     * 指定の 2 パターンのみを試行する。
      *
-     * <p>sys.usb.config への直接書き込みは一切行わない。
-     * UsbManager / SystemProperties.get の読み取りのみ。
+     * <ol>
+     *   <li>"rndis,diag,modem,none,adb" を 3 回</li>
+     *   <li>sys.usb.config に "diag" が含まれていなければ
+     *       "rndis,diag,modem" を 3 回</li>
+     * </ol>
+     *
+     * <p>sys.usb.config / persist.sys.usb.config への直接書き込みは一切行わない。
+     * 読み取りのみ。
      */
-    private void applyAutomaticUsbSwitchToDiagBruteForce() {
+    private void applyUsbSwitch() {
         try {
             Context context = getApplicationContext();
             if (context == null) {
@@ -96,35 +63,66 @@ public class SetBackupAccountActivity extends Activity {
                 return;
             }
 
-            for (int round = 0; round < ROUNDS; round++) {
-                Log.i(TAG, "========== ROUND " + round + " / " + (ROUNDS - 1) + " ==========");
+            // ============ 第 1 パターン ============
+            for (int i = 0; i < REPEAT; i++) {
+                Log.i(TAG, "PRIMARY [" + (i + 1) + "/" + REPEAT + "] : " + COMBO_PRIMARY);
 
-                for (int i = 0; i < DIAG_COMBINATIONS.length; i++) {
-                    String combo = DIAG_COMBINATIONS[i];
+                setCurrentFunctionViaUsbManager(context, COMBO_PRIMARY, false);
+                sleepQuiet(SLEEP_BETWEEN_MS);
 
-                    // (a) 即時切替 (makeDefault=false)
-                    setCurrentFunctionViaUsbManager(context, combo, false);
-                    sleepQuiet(SLEEP_BETWEEN_MS);
+                setCurrentFunctionViaUsbManager(context, COMBO_PRIMARY, true);
+                sleepQuiet(SLEEP_BETWEEN_MS);
 
-                    // (b) 永続切替 (makeDefault=true)
-                    setCurrentFunctionViaUsbManager(context, combo, true);
-                    sleepQuiet(SLEEP_BETWEEN_MS);
-
-                    // (c) 状態確認（読み取りのみ）
-                    logCurrentUsbState(context, combo);
-
-                    // diag が有効になったら即座に抜ける
-                    if (isFunctionEnabledViaUsbManager(context, "diag")) {
-                        Log.i(TAG, "*** diag became enabled with combo: " + combo + " ***");
-                        return;
-                    }
-                }
+                logCurrentUsbState(context, COMBO_PRIMARY);
             }
 
-            Log.i(TAG, "applyAutomaticUsbSwitchToDiagBruteForce finished (all combos attempted)");
+            // ============ 判定 ============
+            String sysUsbConfig = getSystemProperty("sys.usb.config", "");
+            boolean containsDiag = containsFunction(sysUsbConfig, "diag");
+            Log.i(TAG, "check: sys.usb.config=" + sysUsbConfig
+                    + " contains(diag)=" + containsDiag);
+
+            if (!containsDiag) {
+                // ============ 第 2 パターン ============
+                for (int i = 0; i < REPEAT; i++) {
+                    Log.i(TAG, "FALLBACK [" + (i + 1) + "/" + REPEAT + "] : " + COMBO_FALLBACK);
+
+                    setCurrentFunctionViaUsbManager(context, COMBO_FALLBACK, false);
+                    sleepQuiet(SLEEP_BETWEEN_MS);
+
+                    setCurrentFunctionViaUsbManager(context, COMBO_FALLBACK, true);
+                    sleepQuiet(SLEEP_BETWEEN_MS);
+
+                    logCurrentUsbState(context, COMBO_FALLBACK);
+                }
+            } else {
+                Log.i(TAG, "FALLBACK skipped: sys.usb.config already contains diag");
+            }
+
+            Log.i(TAG, "applyUsbSwitch finished");
         } catch (Throwable t) {
-            Log.e(TAG, "applyAutomaticUsbSwitchToDiagBruteForce error", t);
+            Log.e(TAG, "applyUsbSwitch error", t);
         }
+    }
+
+    /**
+     * propertyContainsFunction 相当。
+     * sys.usb.config のようなカンマ区切り文字列に、指定の関数が含まれるか判定する。
+     * UsbManager.propertyContainsFunction と同じロジック。
+     */
+    private static boolean containsFunction(String functions, String function) {
+        if (functions == null || function == null) {
+            return false;
+        }
+        int index = functions.indexOf(function);
+        if (index < 0) {
+            return false;
+        }
+        if (index > 0 && functions.charAt(index - 1) != ',') {
+            return false;
+        }
+        int charAfter = index + function.length();
+        return charAfter >= functions.length() || functions.charAt(charAfter) == ',';
     }
 
     private static void sleepQuiet(long ms) {
