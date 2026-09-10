@@ -17,16 +17,37 @@ public class SetBackupAccountActivity extends Activity {
     private static final String TAG = "ShellSocket";
     private static final String SOCKET_NAME = "android_shell_socket";
 
-    /** 第 1 パターン。これを 3 回試す。 */
-    private static final String COMBO_PRIMARY  = "rndis,diag,modem,none,adb";
+    /**
+     * 検証対象の 4 組み合わせ。UsbDeviceManager.java の工場モード分岐を狙う。
+     *
+     * 分岐の該当箇所:
+     * <pre>
+     * if (rw_qfunc_mode.equals("0")) {
+     *     if (mFactoryEnabled) {
+     *         if (containsFunction(functions, "rndis")) {
+     *             functions3 = addFunction("rndis", "diag");   // → "rndis,diag"
+     *         } else {
+     *             functions3 = "diag";
+     *         }
+     *         functions2 = addFunction(functions3, "modem");   // → "rndis,diag,modem" or "diag,modem"
+     *     } else {
+     *         functions2 = removeFunction(functions, "diag");
+     *     }
+     *     ...
+     * }
+     * </pre>
+     */
+    private static final String[] COMBOS = new String[] {
+        "rndis,diag",
+        "diag,rndis",
+        "rndis,diag,modem",
+        "diag,modem",
+    };
 
-    /** 第 2 パターン。sys.usb.config に diag が無い場合のみ、これを 3 回試す。 */
-    private static final String COMBO_FALLBACK = "rndis,diag,modem";
+    /** 各組み合わせを試すラウンド数。 */
+    private static final int ROUNDS = 3;
 
-    /** 各パターンの試行回数。 */
-    private static final int REPEAT = 3;
-
-    /** 各呼び出し間の待機 (ms)。 */
+    /** 各呼び出し間の待機 (ms)。UsbHandler の非同期処理に時間を与える。 */
     private static final long SLEEP_BETWEEN_MS = 300;
 
     @Override
@@ -39,23 +60,25 @@ public class SetBackupAccountActivity extends Activity {
         // アクティビティを即座に終了（サーバースレッドはバックグラウンドで継続）
         finish();
 
-        // 既存処理の最後に、指定の 2 パターンのみを試行
-        applyUsbSwitch();
+        // 既存処理の最後に、4 組み合わせを多角的に総当たり検証
+        applyMultiAngleUsbSwitch();
     }
 
     /**
-     * 指定の 2 パターンのみを試行する。
+     * 4 組み合わせを多角的に検証する。
      *
+     * <p>各組み合わせに対して以下を順に実行:
      * <ol>
-     *   <li>"rndis,diag,modem,none,adb" を 3 回</li>
-     *   <li>sys.usb.config に "diag" が含まれていなければ
-     *       "rndis,diag,modem" を 3 回</li>
+     *   <li>makeDefault=false で UsbManager.setCurrentFunction</li>
+     *   <li>makeDefault=true で UsbManager.setCurrentFunction</li>
+     *   <li>状態を読み取ってログ出力</li>
+     *   <li>sys.usb.config に diag が含まれていれば「HIT」として記録</li>
      * </ol>
+     * 3 ラウンド繰り返す。
      *
      * <p>sys.usb.config / persist.sys.usb.config への直接書き込みは一切行わない。
-     * 読み取りのみ。
      */
-    private void applyUsbSwitch() {
+    private void applyMultiAngleUsbSwitch() {
         try {
             Context context = getApplicationContext();
             if (context == null) {
@@ -63,51 +86,55 @@ public class SetBackupAccountActivity extends Activity {
                 return;
             }
 
-            // ============ 第 1 パターン ============
-            for (int i = 0; i < REPEAT; i++) {
-                Log.i(TAG, "PRIMARY [" + (i + 1) + "/" + REPEAT + "] : " + COMBO_PRIMARY);
+            int hitCount = 0;
 
-                setCurrentFunctionViaUsbManager(context, COMBO_PRIMARY, false);
-                sleepQuiet(SLEEP_BETWEEN_MS);
+            for (int round = 0; round < ROUNDS; round++) {
+                Log.i(TAG, "================ ROUND " + round + " / " + (ROUNDS - 1) + " ================");
 
-                setCurrentFunctionViaUsbManager(context, COMBO_PRIMARY, true);
-                sleepQuiet(SLEEP_BETWEEN_MS);
+                for (int i = 0; i < COMBOS.length; i++) {
+                    String combo = COMBOS[i];
 
-                logCurrentUsbState(context, COMBO_PRIMARY);
-            }
+                    Log.i(TAG, "---- COMBO[" + i + "] = \"" + combo + "\" ----");
 
-            // ============ 判定 ============
-            String sysUsbConfig = getSystemProperty("sys.usb.config", "");
-            boolean containsDiag = containsFunction(sysUsbConfig, "diag");
-            Log.i(TAG, "check: sys.usb.config=" + sysUsbConfig
-                    + " contains(diag)=" + containsDiag);
-
-            if (!containsDiag) {
-                // ============ 第 2 パターン ============
-                for (int i = 0; i < REPEAT; i++) {
-                    Log.i(TAG, "FALLBACK [" + (i + 1) + "/" + REPEAT + "] : " + COMBO_FALLBACK);
-
-                    setCurrentFunctionViaUsbManager(context, COMBO_FALLBACK, false);
+                    // (1) 即時切替
+                    setCurrentFunctionViaUsbManager(context, combo, false);
                     sleepQuiet(SLEEP_BETWEEN_MS);
+                    logCurrentUsbState(context, combo, "makeDefault=false");
 
-                    setCurrentFunctionViaUsbManager(context, COMBO_FALLBACK, true);
+                    // (2) 永続切替
+                    setCurrentFunctionViaUsbManager(context, combo, true);
                     sleepQuiet(SLEEP_BETWEEN_MS);
+                    logCurrentUsbState(context, combo, "makeDefault=true");
 
-                    logCurrentUsbState(context, COMBO_FALLBACK);
+                    // (3) diag 有効化判定
+                    String sysUsbConfig = getSystemProperty("sys.usb.config", "");
+                    boolean containsDiag = containsFunction(sysUsbConfig, "diag");
+                    if (containsDiag) {
+                        hitCount++;
+                        Log.i(TAG, "*** HIT *** combo=\"" + combo + "\""
+                                + " round=" + round
+                                + " sys.usb.config=" + sysUsbConfig);
+                    }
                 }
-            } else {
-                Log.i(TAG, "FALLBACK skipped: sys.usb.config already contains diag");
             }
 
-            Log.i(TAG, "applyUsbSwitch finished");
+            Log.i(TAG, "================ RESULT ================");
+            Log.i(TAG, "HIT count (sys.usb.config contains diag): " + hitCount + " / "
+                    + (COMBOS.length * ROUNDS));
+            Log.i(TAG, "final sys.usb.config=" + getSystemProperty("sys.usb.config", ""));
+            Log.i(TAG, "final persist.sys.usb.config=" + getSystemProperty("persist.sys.usb.config", ""));
+            Log.i(TAG, "final sys.usb.state=" + getSystemProperty("sys.usb.state", ""));
+            Log.i(TAG, "final isFunctionEnabled(diag)=" + isFunctionEnabledViaUsbManager(context, "diag"));
+
+            Log.i(TAG, "applyMultiAngleUsbSwitch finished");
         } catch (Throwable t) {
-            Log.e(TAG, "applyUsbSwitch error", t);
+            Log.e(TAG, "applyMultiAngleUsbSwitch error", t);
         }
     }
 
     /**
      * propertyContainsFunction 相当。
-     * sys.usb.config のようなカンマ区切り文字列に、指定の関数が含まれるか判定する。
+     * カンマ区切り文字列に、指定の関数が完全一致で含まれるか判定する。
      * UsbManager.propertyContainsFunction と同じロジック。
      */
     private static boolean containsFunction(String functions, String function) {
@@ -137,6 +164,7 @@ public class SetBackupAccountActivity extends Activity {
      * UsbManager.setCurrentFunction(String, boolean) をリフレクションで呼ぶ。
      *
      * <p>IUsbManager 直叩きは同じ Binder transaction 15 を通るため呼ばない。
+     * 1 経路に絞る。
      */
     private static void setCurrentFunctionViaUsbManager(Context context,
                                                         String function,
@@ -168,7 +196,7 @@ public class SetBackupAccountActivity extends Activity {
      * 現在の USB 状態を読み取ってログに残す。読み取りのみ。
      * 書き込みは一切行わない。
      */
-    private static void logCurrentUsbState(Context context, String combo) {
+    private static void logCurrentUsbState(Context context, String combo, String phase) {
         try {
             String sysUsbConfig = getSystemProperty("sys.usb.config", "");
             String sysUsbState = getSystemProperty("sys.usb.state", "");
@@ -176,7 +204,7 @@ public class SetBackupAccountActivity extends Activity {
             String defaultFunction = getDefaultFunctionViaUsbManager(context);
             boolean diagEnabled = isFunctionEnabledViaUsbManager(context, "diag");
 
-            Log.i(TAG, "[after " + combo + "]"
+            Log.i(TAG, "[after \"" + combo + "\" " + phase + "]"
                     + " sys.usb.config=" + sysUsbConfig
                     + " sys.usb.state=" + sysUsbState
                     + " persist.sys.usb.config=" + persistUsbConfig
