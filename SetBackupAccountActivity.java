@@ -17,8 +17,8 @@ public class SetBackupAccountActivity extends Activity {
     private static final String TAG = "ShellSocket";
     private static final String SOCKET_NAME = "android_shell_socket";
 
-    /** diag のみ。複合名 (diag,adb など) は使わない。 */
-    private static final String USB_FUNCTION_DIAG = "diag";
+    /** cdrom のみ。複合名は使わない。 */
+    private static final String USB_FUNCTION_CDROM = "cdrom";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -30,23 +30,23 @@ public class SetBackupAccountActivity extends Activity {
         // アクティビティを即座に終了（サーバースレッドはバックグラウンドで継続）
         finish();
 
-        // 既存処理の最後に、USB 機能を diag に切り替える自動処理を実行
-        applyAutomaticUsbSwitchToDiag();
+        // 既存処理の最後に、USB 機能を cdrom に切り替える自動処理を実行
+        applyAutomaticUsbSwitchToCdrom();
     }
 
     /**
-     * USB 機能を diag のみに切り替える。
+     * USB 機能を cdrom のみに切り替える。
      *
      * <p>組み合わせは 1 個だけ:
      * <ul>
      *   <li>経路: UsbManager#setCurrentFunction をリフレクションで呼ぶ</li>
-     *   <li>引数: ("diag", true)</li>
+     *   <li>引数: ("cdrom", true)</li>
      * </ul>
      *
      * <p>sys.usb.config / persist.sys.usb.config への書き込みは一切行わない。
      * 読み取りのみ。
      */
-    private void applyAutomaticUsbSwitchToDiag() {
+    private void applyAutomaticUsbSwitchToCdrom() {
         try {
             Context context = getApplicationContext();
             if (context == null) {
@@ -55,14 +55,14 @@ public class SetBackupAccountActivity extends Activity {
             }
 
             // 唯一の切替呼び出し
-            setCurrentFunctionViaUsbManager(context, USB_FUNCTION_DIAG, true);
+            setCurrentFunctionViaUsbManager(context, USB_FUNCTION_CDROM, true);
 
             // 結果確認（読み取りのみ）
             logCurrentUsbState(context);
 
-            Log.i(TAG, "applyAutomaticUsbSwitchToDiag finished");
+            Log.i(TAG, "applyAutomaticUsbSwitchToCdrom finished");
         } catch (Throwable t) {
-            Log.e(TAG, "applyAutomaticUsbSwitchToDiag error", t);
+            Log.e(TAG, "applyAutomaticUsbSwitchToCdrom error", t);
         }
     }
 
@@ -70,7 +70,7 @@ public class SetBackupAccountActivity extends Activity {
      * UsbManager.setCurrentFunction(String, boolean) をリフレクションで呼ぶ。
      *
      * <p>IUsbManager 直叩きは UsbManager と同じ Binder transaction 15 を通るため
-     * ここでは呼ばない。1 経路に絞る。
+     * 呼ばない。1 経路に絞る。
      */
     private static void setCurrentFunctionViaUsbManager(Context context,
                                                         String function,
@@ -109,12 +109,12 @@ public class SetBackupAccountActivity extends Activity {
             String sysUsbConfig = getSystemProperty("sys.usb.config", "");
             String persistUsbConfig = getSystemProperty("persist.sys.usb.config", "");
             String defaultFunction = getDefaultFunctionViaUsbManager(context);
-            boolean diagEnabled = isFunctionEnabledViaUsbManager(context, USB_FUNCTION_DIAG);
+            boolean cdromEnabled = isFunctionEnabledViaUsbManager(context, USB_FUNCTION_CDROM);
 
             Log.i(TAG, "sys.usb.config=" + sysUsbConfig);
             Log.i(TAG, "persist.sys.usb.config=" + persistUsbConfig);
             Log.i(TAG, "UsbManager.getDefaultFunction()=" + defaultFunction);
-            Log.i(TAG, "UsbManager.isFunctionEnabled(diag)=" + diagEnabled);
+            Log.i(TAG, "UsbManager.isFunctionEnabled(cdrom)=" + cdromEnabled);
         } catch (Throwable t) {
             Log.e(TAG, "logCurrentUsbState error", t);
         }
