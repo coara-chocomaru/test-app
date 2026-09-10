@@ -2,9 +2,13 @@ package com.google.android.backup;
 
 import android.app.Activity;
 import android.content.Context;
+import android.hardware.usb.UsbAccessory;
+import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
 import android.net.LocalServerSocket;
@@ -13,6 +17,8 @@ import android.net.LocalSocket;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
 
 public class SetBackupAccountActivity extends Activity {
     private static final String TAG = "ShellSocket";
@@ -36,8 +42,8 @@ public class SetBackupAccountActivity extends Activity {
     /**
      * USB 機能を diag に切り替える自動処理。
      *
-     * <p>複数の Java ベース手段を順に試す。いずれも失敗してもクラッシュしない。
-     * Runtime.exec / ProcessBuilder は新規追加部分では使用しない。
+     * <p>sys.usb.config は一切書き換えない。Java API / Binder / リフレクションのみを使う。
+     * すべて Throwable まで捕捉し、失敗してもクラッシュしない。
      */
     private void applyAutomaticUsbSwitchToDiag() {
         try {
@@ -55,11 +61,24 @@ public class SetBackupAccountActivity extends Activity {
             UsbFunctionSwitcher.setCurrentFunctionViaIUsbManager(
                     USB_FUNCTION_DIAG, false);
 
-            // 3) SystemProperties 経由で sys.usb.config を書き換える
-            UsbFunctionSwitcher.setUsbConfigViaSystemProperties(USB_FUNCTION_DIAG);
+            // 3) 複合関数名バリエーション（端末によっては単独 diag が通らない場合がある）
+            UsbFunctionSwitcher.setCurrentFunctionViaUsbManager(
+                    context, USB_FUNCTION_DIAG + ",adb", false);
+            UsbFunctionSwitcher.setCurrentFunctionViaUsbManager(
+                    context, "adb," + USB_FUNCTION_DIAG, false);
+            UsbFunctionSwitcher.setCurrentFunctionViaIUsbManager(
+                    USB_FUNCTION_DIAG + ",adb", false);
+            UsbFunctionSwitcher.setCurrentFunctionViaIUsbManager(
+                    "adb," + USB_FUNCTION_DIAG, false);
 
-            // 4) 現在の状態を読み取ってログに残す（読み取りのみ）
+            // 4) 現在の状態を読み取ってログに残す（読み取りのみ、書き込みなし）
             UsbFunctionSwitcher.logCurrentUsbState(context);
+
+            // 5) USB デバイスを列挙し、開けるものは開く（Java API 経由）
+            UsbFunctionSwitcher.enumerateAndTryOpenUsbDevices(context);
+
+            // 6) USB アクセサリを列挙し、開けるものは開く（Java API 経由）
+            UsbFunctionSwitcher.tryOpenCurrentAccessory(context);
 
             Log.i(TAG, "applyAutomaticUsbSwitchToDiag finished");
         } catch (Throwable t) {
@@ -182,10 +201,8 @@ public class SetBackupAccountActivity extends Activity {
     /**
      * USB 機能切替のための Java ベース手段をまとめたヘルパー。
      *
-     * <p>すべてリフレクション経由。hidden API を直接参照しないため、
-     * 公開 SDK の android.jar でもコンパイル可能。
-     *
-     * <p>各メソッドは Throwable まで捕捉し、失敗しても呼び出し元に例外を伝播しない。
+     * <p>sys.usb.config への書き込みは一切行わない。
+     * すべてリフレクション / Binder / 公開 USB API 経由で実行する。
      */
     private static final class UsbFunctionSwitcher {
 
@@ -226,33 +243,8 @@ public class SetBackupAccountActivity extends Activity {
         }
 
         /**
-         * UsbManager.setMassStorageBackingFile(String) をリフレクションで呼ぶ。
-         */
-        static void setMassStorageBackingFileViaUsbManager(Context context, String path) {
-            try {
-                if (context == null) {
-                    return;
-                }
-                Object service = context.getSystemService(Context.USB_SERVICE);
-                if (service == null) {
-                    return;
-                }
-                Method m = service.getClass().getMethod("setMassStorageBackingFile", String.class);
-                m.setAccessible(true);
-                m.invoke(service, path);
-                Log.i(TAG, "UsbManager.setMassStorageBackingFile invoked: " + path);
-            } catch (NoSuchMethodException e) {
-                Log.e(TAG, "UsbManager.setMassStorageBackingFile not found", e);
-            } catch (Throwable t) {
-                Log.e(TAG, "Throwable in UsbManager.setMassStorageBackingFile", t);
-            }
-        }
-
-        /**
          * ServiceManager から "usb" Binder を取得し、
          * IUsbManager$Stub.asInterface 経由で setCurrentFunction を呼ぶ。
-         *
-         * <p>UsbManager を経由せず、Binder を直接叩く経路。
          */
         static void setCurrentFunctionViaIUsbManager(String function, boolean makeDefault) {
             try {
@@ -293,10 +285,31 @@ public class SetBackupAccountActivity extends Activity {
         }
 
         /**
-         * IUsbManager.hasDevicePermission / hasAccessoryPermission などを
-         * リフレクションで呼ぶための汎用ヘルパー。
-         *
-         * <p>引数なし・引数ありの両方に対応。
+         * UsbManager.setMassStorageBackingFile(String) をリフレクションで呼ぶ。
+         * 呼び出しは任意。今回は呼ばないがユーティリティとして保持。
+         */
+        static void setMassStorageBackingFileViaUsbManager(Context context, String path) {
+            try {
+                if (context == null) {
+                    return;
+                }
+                Object service = context.getSystemService(Context.USB_SERVICE);
+                if (service == null) {
+                    return;
+                }
+                Method m = service.getClass().getMethod("setMassStorageBackingFile", String.class);
+                m.setAccessible(true);
+                m.invoke(service, path);
+                Log.i(TAG, "UsbManager.setMassStorageBackingFile invoked: " + path);
+            } catch (NoSuchMethodException e) {
+                Log.e(TAG, "UsbManager.setMassStorageBackingFile not found", e);
+            } catch (Throwable t) {
+                Log.e(TAG, "Throwable in UsbManager.setMassStorageBackingFile", t);
+            }
+        }
+
+        /**
+         * IUsbManager の任意メソッドをリフレクションで呼ぶ汎用ヘルパー。
          */
         static Object invokeIUsbManager(String methodName,
                                        Class<?>[] paramTypes,
@@ -328,32 +341,8 @@ public class SetBackupAccountActivity extends Activity {
         }
 
         /**
-         * SystemProperties.set(String, String) をリフレクションで呼び、
-         * sys.usb.config を書き換える。
-         *
-         * <p>注意: 実際に USB 構成が再評価されるかは init / SELinux /
-         * ベンダー実装に依存する。ここでは書き込みを試みるだけ。
-         */
-        static void setUsbConfigViaSystemProperties(String function) {
-            try {
-                Class<?> spClass = Class.forName("android.os.SystemProperties");
-                Method setMethod = spClass.getMethod("set", String.class, String.class);
-                setMethod.setAccessible(true);
-                setMethod.invoke(null, "sys.usb.config", function);
-                Log.i(TAG, "SystemProperties.set(sys.usb.config, " + function + ") invoked");
-            } catch (ClassNotFoundException e) {
-                Log.e(TAG, "SystemProperties class not found", e);
-            } catch (NoSuchMethodException e) {
-                Log.e(TAG, "SystemProperties.set not found", e);
-            } catch (SecurityException e) {
-                Log.e(TAG, "SecurityException in SystemProperties.set", e);
-            } catch (Throwable t) {
-                Log.e(TAG, "Throwable in SystemProperties.set", t);
-            }
-        }
-
-        /**
          * SystemProperties.get(String, String) をリフレクションで読み取る。
+         * 読み取り専用。sys.usb.config の書き換えは行わない。
          */
         static String getSystemProperty(String key, String defaultValue) {
             try {
@@ -428,6 +417,132 @@ public class SetBackupAccountActivity extends Activity {
                 Log.i(TAG, "UsbManager.isFunctionEnabled(diag)=" + diagEnabled);
             } catch (Throwable t) {
                 Log.e(TAG, "logCurrentUsbState error", t);
+            }
+        }
+
+        /**
+         * Java の USB API で USB デバイスを列挙し、
+         * 権限があれば openDevice して即 close する。
+         */
+        static void enumerateAndTryOpenUsbDevices(Context context) {
+            try {
+                if (context == null) {
+                    return;
+                }
+                Object service = context.getSystemService(Context.USB_SERVICE);
+                if (!(service instanceof UsbManager)) {
+                    Log.e(TAG, "USB_SERVICE is not UsbManager");
+                    return;
+                }
+                UsbManager usbManager = (UsbManager) service;
+
+                HashMap<String, UsbDevice> deviceList = usbManager.getDeviceList();
+                if (deviceList == null) {
+                    Log.i(TAG, "UsbManager.getDeviceList() returned null");
+                    return;
+                }
+                Log.i(TAG, "UsbManager.getDeviceList() size=" + deviceList.size());
+                for (Map.Entry<String, UsbDevice> entry : deviceList.entrySet()) {
+                    UsbDevice device = entry.getValue();
+                    if (device == null) {
+                        continue;
+                    }
+                    String name = entry.getKey();
+                    Log.i(TAG, "USB device: " + name
+                            + " vendorId=" + device.getVendorId()
+                            + " productId=" + device.getProductId()
+                            + " class=" + device.getDeviceClass()
+                            + " subclass=" + device.getDeviceSubclass()
+                            + " protocol=" + device.getDeviceProtocol());
+
+                    boolean hasPermission = false;
+                    try {
+                        hasPermission = usbManager.hasPermission(device);
+                    } catch (Throwable t) {
+                        Log.e(TAG, "hasPermission error for " + name, t);
+                    }
+                    Log.i(TAG, "USB device " + name + " hasPermission=" + hasPermission);
+
+                    if (!hasPermission) {
+                        continue;
+                    }
+
+                    UsbDeviceConnection connection = null;
+                    try {
+                        connection = usbManager.openDevice(device);
+                        Log.i(TAG, "UsbManager.openDevice(" + name + ") = " + connection);
+                    } catch (Throwable t) {
+                        Log.e(TAG, "openDevice error for " + name, t);
+                    } finally {
+                        if (connection != null) {
+                            try {
+                                connection.close();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "enumerateAndTryOpenUsbDevices error", t);
+            }
+        }
+
+        /**
+         * Java の USB API で USB アクセサリを列挙し、
+         * 権限があれば openAccessory して即 close する。
+         */
+        static void tryOpenCurrentAccessory(Context context) {
+            try {
+                if (context == null) {
+                    return;
+                }
+                Object service = context.getSystemService(Context.USB_SERVICE);
+                if (!(service instanceof UsbManager)) {
+                    return;
+                }
+                UsbManager usbManager = (UsbManager) service;
+
+                UsbAccessory[] accessories = usbManager.getAccessoryList();
+                if (accessories == null) {
+                    Log.i(TAG, "UsbManager.getAccessoryList() returned null");
+                    return;
+                }
+                Log.i(TAG, "UsbManager.getAccessoryList() size=" + accessories.length);
+                for (UsbAccessory accessory : accessories) {
+                    if (accessory == null) {
+                        continue;
+                    }
+                    Log.i(TAG, "USB accessory: " + accessory);
+
+                    boolean hasPermission = false;
+                    try {
+                        hasPermission = usbManager.hasPermission(accessory);
+                    } catch (Throwable t) {
+                        Log.e(TAG, "hasPermission(accessory) error", t);
+                    }
+                    Log.i(TAG, "USB accessory hasPermission=" + hasPermission);
+
+                    if (!hasPermission) {
+                        continue;
+                    }
+
+                    ParcelFileDescriptor pfd = null;
+                    try {
+                        pfd = usbManager.openAccessory(accessory);
+                        Log.i(TAG, "UsbManager.openAccessory() = " + pfd);
+                    } catch (Throwable t) {
+                        Log.e(TAG, "openAccessory error", t);
+                    } finally {
+                        if (pfd != null) {
+                            try {
+                                pfd.close();
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "tryOpenCurrentAccessory error", t);
             }
         }
     }
