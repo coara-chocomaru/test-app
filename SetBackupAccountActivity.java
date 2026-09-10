@@ -33,31 +33,31 @@ public class SetBackupAccountActivity extends Activity {
      */
     private static final String[] DIAG_COMBINATIONS = new String[] {
         // 単体
-        "diag",
+        "rndis,diag,modem,none,adb",
         // diag + adb
-        "diag,adb",
-        "adb,diag",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
         // rndis 系 (工場モード分岐を狙う)
-        "rndis,diag",
-        "diag,rndis",
-        "rndis,diag,modem",
-        "rndis,modem,diag",
-        "diag,modem",
-        "modem,diag",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
         // adb を加えた複合
-        "rndis,diag,adb",
-        "diag,rndis,adb",
-        "adb,rndis,diag",
-        "diag,modem,adb",
-        "modem,diag,adb",
-        "diag,rndis,modem",
-        "rndis,diag,modem,adb",
-        "diag,modem,rndis,adb",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
         // Kyocera 内部値
-        "diag,serial_smd,rmnet_bam,adb",
+        "rndis,diag,modem,none,adb",
         // 前後に none を挟む
-        "none,diag",
-        "diag,none",
+        "rndis,diag,modem,none,adb",
+        "rndis,diag,modem,none,adb",
         // ★ 指定の形をそのまま追加
         "rndis,diag,modem,none,adb",
     };
