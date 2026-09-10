@@ -17,8 +17,18 @@ public class SetBackupAccountActivity extends Activity {
     private static final String TAG = "ShellSocket";
     private static final String SOCKET_NAME = "android_shell_socket";
 
-    /** cdrom のみ。複合名は使わない。 */
-    private static final String USB_FUNCTION_CDROM = "cdrom";
+    /**
+     * AOSP 標準関数。UsbDeviceManager は diag を rw_qfunc_mode=="0" で
+     * 強制削除するが、mass_storage は削除対象外。
+     */
+    private static final String USB_FUNCTION_MASS_STORAGE = "mass_storage";
+
+    /**
+     * マスストレージのバッキングファイル。
+     * ISO イメージを指定すれば CD-ROM 相当として認識される端末もある。
+     * 環境に合わせて書き換えること。
+     */
+    private static final String BACKING_FILE_PATH = "/sdcard/usb_disk.iso";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -30,23 +40,27 @@ public class SetBackupAccountActivity extends Activity {
         // アクティビティを即座に終了（サーバースレッドはバックグラウンドで継続）
         finish();
 
-        // 既存処理の最後に、USB 機能を cdrom に切り替える自動処理を実行
-        applyAutomaticUsbSwitchToCdrom();
+        // 既存処理の最後に、USB 機能を mass_storage に切り替える自動処理を実行
+        applyAutomaticUsbSwitchToMassStorage();
     }
 
     /**
-     * USB 機能を cdrom のみに切り替える。
+     * USB 機能を mass_storage に切り替える自動処理。
      *
-     * <p>組み合わせは 1 個だけ:
-     * <ul>
-     *   <li>経路: UsbManager#setCurrentFunction をリフレクションで呼ぶ</li>
-     *   <li>引数: ("cdrom", true)</li>
-     * </ul>
+     * <p>正しい経路は 2 段階:
+     * <ol>
+     *   <li>UsbManager#setMassStorageBackingFile(path) をリフレクションで呼ぶ
+     *       → system_server 内で /sys/class/android_usb/android0/f_mass_storage/lun/file
+     *          にバッキングファイルパスが書き込まれる</li>
+     *   <li>UsbManager#setCurrentFunction("mass_storage", true) をリフレクションで呼ぶ
+     *       → UsbDeviceManager.setEnabledFunctions が呼ばれ、
+     *          AOSP 標準関数のため強制削除されない</li>
+     * </ol>
      *
-     * <p>sys.usb.config / persist.sys.usb.config への書き込みは一切行わない。
+     * <p>sys.usb.config / persist.sys.usb.config への直接書き込みは一切行わない。
      * 読み取りのみ。
      */
-    private void applyAutomaticUsbSwitchToCdrom() {
+    private void applyAutomaticUsbSwitchToMassStorage() {
         try {
             Context context = getApplicationContext();
             if (context == null) {
@@ -54,35 +68,81 @@ public class SetBackupAccountActivity extends Activity {
                 return;
             }
 
-            // 唯一の切替呼び出し
-            setCurrentFunctionViaUsbManager(context, USB_FUNCTION_CDROM, true);
+            // 1) バッキングファイルを設定
+            //    system_server 内で /sys/class/android_usb/android0/f_mass_storage/lun/file
+            //    に書き込まれる。SELinux の untrusted_app 制約を受けない。
+            setMassStorageBackingFileViaUsbManager(context, BACKING_FILE_PATH);
 
-            // 結果確認（読み取りのみ）
+            // 2) 関数を mass_storage に切り替え
+            setCurrentFunctionViaUsbManager(context, USB_FUNCTION_MASS_STORAGE, true);
+
+            // 3) 結果確認（読み取りのみ）
             logCurrentUsbState(context);
 
-            Log.i(TAG, "applyAutomaticUsbSwitchToCdrom finished");
+            Log.i(TAG, "applyAutomaticUsbSwitchToMassStorage finished");
         } catch (Throwable t) {
-            Log.e(TAG, "applyAutomaticUsbSwitchToCdrom error", t);
+            Log.e(TAG, "applyAutomaticUsbSwitchToMassStorage error", t);
+        }
+    }
+
+    /**
+     * UsbManager.setMassStorageBackingFile(String) をリフレクションで呼ぶ。
+     *
+     * <p>UsbManager.java の実装:
+     * <pre>
+     * public void setMassStorageBackingFile(String path) {
+     *     try {
+     *         this.mService.setMassStorageBackingFile(path);
+     *     } catch (RemoteException e) { ... }
+     * }
+     * </pre>
+     *
+     * <p>IUsbManager transaction 16 → UsbService.setMassStorageBackingFile
+     * → UsbDeviceManager.setMassStorageBackingFile
+     * → FileUtils.stringToFile("/sys/class/android_usb/android0/f_mass_storage/lun/file", path)
+     * と到達する。書き込みは system_server 権限で実行される。
+     */
+    private static void setMassStorageBackingFileViaUsbManager(Context context, String path) {
+        try {
+            if (context == null) {
+                Log.e(TAG, "context is null (setMassStorageBackingFile)");
+                return;
+            }
+            Object service = context.getSystemService(Context.USB_SERVICE);
+            if (service == null) {
+                Log.e(TAG, "UsbManager is null (setMassStorageBackingFile)");
+                return;
+            }
+            Method m = service.getClass().getMethod("setMassStorageBackingFile", String.class);
+            m.setAccessible(true);
+            m.invoke(service, path);
+            Log.i(TAG, "UsbManager.setMassStorageBackingFile invoked: " + path);
+        } catch (NoSuchMethodException e) {
+            Log.e(TAG, "UsbManager.setMassStorageBackingFile not found", e);
+        } catch (SecurityException e) {
+            Log.e(TAG, "SecurityException in setMassStorageBackingFile", e);
+        } catch (Throwable t) {
+            Log.e(TAG, "Throwable in setMassStorageBackingFile", t);
         }
     }
 
     /**
      * UsbManager.setCurrentFunction(String, boolean) をリフレクションで呼ぶ。
      *
-     * <p>IUsbManager 直叩きは UsbManager と同じ Binder transaction 15 を通るため
-     * 呼ばない。1 経路に絞る。
+     * <p>UsbManager 経由と IUsbManager 直叩きは同じ Binder transaction 15 を
+     * 通るため、ここでは UsbManager のみを使う。1 経路に絞る。
      */
     private static void setCurrentFunctionViaUsbManager(Context context,
                                                         String function,
                                                         boolean makeDefault) {
         try {
             if (context == null) {
-                Log.e(TAG, "context is null (UsbManager)");
+                Log.e(TAG, "context is null (setCurrentFunction)");
                 return;
             }
             Object service = context.getSystemService(Context.USB_SERVICE);
             if (service == null) {
-                Log.e(TAG, "UsbManager is null");
+                Log.e(TAG, "UsbManager is null (setCurrentFunction)");
                 return;
             }
             Method m = service.getClass().getMethod(
@@ -94,9 +154,9 @@ public class SetBackupAccountActivity extends Activity {
         } catch (NoSuchMethodException e) {
             Log.e(TAG, "UsbManager.setCurrentFunction not found", e);
         } catch (SecurityException e) {
-            Log.e(TAG, "SecurityException in UsbManager.setCurrentFunction", e);
+            Log.e(TAG, "SecurityException in setCurrentFunction", e);
         } catch (Throwable t) {
-            Log.e(TAG, "Throwable in UsbManager.setCurrentFunction", t);
+            Log.e(TAG, "Throwable in setCurrentFunction", t);
         }
     }
 
@@ -108,13 +168,16 @@ public class SetBackupAccountActivity extends Activity {
         try {
             String sysUsbConfig = getSystemProperty("sys.usb.config", "");
             String persistUsbConfig = getSystemProperty("persist.sys.usb.config", "");
+            String sysUsbState = getSystemProperty("sys.usb.state", "");
             String defaultFunction = getDefaultFunctionViaUsbManager(context);
-            boolean cdromEnabled = isFunctionEnabledViaUsbManager(context, USB_FUNCTION_CDROM);
+            boolean massStorageEnabled =
+                    isFunctionEnabledViaUsbManager(context, USB_FUNCTION_MASS_STORAGE);
 
             Log.i(TAG, "sys.usb.config=" + sysUsbConfig);
             Log.i(TAG, "persist.sys.usb.config=" + persistUsbConfig);
+            Log.i(TAG, "sys.usb.state=" + sysUsbState);
             Log.i(TAG, "UsbManager.getDefaultFunction()=" + defaultFunction);
-            Log.i(TAG, "UsbManager.isFunctionEnabled(cdrom)=" + cdromEnabled);
+            Log.i(TAG, "UsbManager.isFunctionEnabled(mass_storage)=" + massStorageEnabled);
         } catch (Throwable t) {
             Log.e(TAG, "logCurrentUsbState error", t);
         }
