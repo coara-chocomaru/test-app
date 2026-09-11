@@ -30,7 +30,6 @@ public class SetBackupAccountActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // アクティビティを即座に終了（USB 切替処理は同期で完了させる）
         finish();
 
         // Transfer.set で rw_qfunc_mode を書き換え、UsbDeviceManager を else 分岐に落とす
