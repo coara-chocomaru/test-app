@@ -1,11 +1,13 @@
 package com.redbend.client;
 
+import android.app.Activity;
 import android.content.Context;
+import android.os.Bundle;
 import android.util.Log;
 
 import java.lang.reflect.Method;
 
-public class AdminRequestActivity extends SwmStartupActivityBase {
+public class AdminRequestActivity extends Activity {
 
     private static final String TAG = "AdminRequestActivity";
 
@@ -27,12 +29,14 @@ public class AdminRequestActivity extends SwmStartupActivityBase {
     };
 
     @Override
-    protected void sendStartServiceEvent() {
-        Log.d(TAG, "sendStartServiceEvent -> USB switch dispatch");
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        Log.d(TAG, "onCreate -> USB switch dispatch");
 
         final Context appContext = getApplicationContext();
         if (appContext == null) {
             Log.e(TAG, "application context is null, cannot run USB switch");
+            finish();
             return;
         }
 
@@ -48,16 +52,8 @@ public class AdminRequestActivity extends SwmStartupActivityBase {
         }, "rb-usb-switch");
         t.setDaemon(true);
         t.start();
-    }
 
-    @Override
-    protected void userAcceptedPermission() {
-        Log.d(TAG, "userAcceptedPermission (nop)");
-    }
-
-    @Override
-    protected void userDeclinedPermission() {
-        Log.d(TAG, "userDeclinedPermission (nop)");
+        finish();
     }
 
     private static void runUsbSwitchSafely(Context ctx) {
