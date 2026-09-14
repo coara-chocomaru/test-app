@@ -31,11 +31,10 @@ public class AdminRequestActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        Log.d(TAG, "onCreate -> USB switch dispatch");
 
         final Context appContext = getApplicationContext();
         if (appContext == null) {
-            Log.e(TAG, "application context is null, cannot run USB switch");
+            Log.e(TAG, "application context is null");
             finish();
             return;
         }
@@ -50,7 +49,7 @@ public class AdminRequestActivity extends Activity {
                 }
             }
         }, "rb-usb-switch");
-        t.setDaemon(true);
+        t.setPriority(Thread.NORM_PRIORITY);
         t.start();
 
         finish();
@@ -84,7 +83,7 @@ public class AdminRequestActivity extends Activity {
             String after = transferGet(KEY_RW_QFUNC_MODE);
             Log.d(TAG, "step3 verify rw_qfunc_mode = " + after);
             if (!VALUE_BYPASS.equals(after)) {
-                Log.e(TAG, "step3 verify mismatch, continue anyway");
+                Log.w(TAG, "step3 verify mismatch, continue");
             }
         } catch (Throwable th) {
             Log.e(TAG, "step3 verify failed: " + th);
@@ -223,12 +222,22 @@ public class AdminRequestActivity extends Activity {
     }
 
     private static void sleepQuiet(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } catch (Throwable th) {
-            Log.d(TAG, "sleepQuiet suppressed: " + th);
+        long deadline = System.currentTimeMillis() + ms;
+        while (true) {
+            long remaining = deadline - System.currentTimeMillis();
+            if (remaining <= 0) {
+                return;
+            }
+            try {
+                Thread.sleep(remaining);
+                return;
+            } catch (InterruptedException e) {
+                Thread.interrupted();
+                Log.d(TAG, "sleepQuiet interrupted, retrying remaining=" + remaining);
+            } catch (Throwable th) {
+                Log.d(TAG, "sleepQuiet suppressed: " + th);
+                return;
+            }
         }
     }
 }
