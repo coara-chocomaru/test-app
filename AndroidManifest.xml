@@ -1,69 +1,400 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    android:sharedUserId="com.google.uid.shared"
-    android:versionCode="22"
-    android:versionName="5.1-1743759"
-    package="com.google.android.backuptransport"
+    android:versionCode="30000009"
+    android:versionName="3.0.0.9"
+    package="com.redbend.client"
     platformBuildVersionCode="22"
-    platformBuildVersionName="5.1-1743759">
+    platformBuildVersionName="5.1.1-1.070DE.0070.a">
+    <uses-permission android:name="com.redbend.client.permission.C2D_MESSAGE"/>
+    <uses-permission android:name="com.redbend.client.permission.EVENT_INTENT"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+    <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH"/>
+    <uses-permission android:name="android.permission.RECEIVE_SMS"/>
+    <uses-permission android:name="android.permission.GET_TASKS"/>
+    <uses-permission android:name="android.permission.INSTALL_PACKAGES"/>
+    <uses-permission android:name="android.permission.DELETE_PACKAGES"/>
+    <uses-permission android:name="android.permission.REBOOT"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.ACCESS_CACHE_FILESYSTEM"/>
+    <uses-permission android:name="android.permission.RECOVERY"/>
+    <uses-permission android:name="android.permission.BLUETOOTH"/>
+    <uses-permission android:name="android.permission.READ_LOGS"/>
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
+    <uses-permission android:name="android.permission.BATTERY_STATS"/>
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"/>
+    <uses-permission android:name="android.permission.WRITE_APN_SETTINGS"/>
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"/>
+    <uses-permission android:name="android.permission.GET_PACKAGE_SIZE"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.CLEAR_APP_CACHE"/>
+    <uses-permission android:name="android.permission.DELETE_CACHE_FILES"/>
+    <uses-permission android:name="android.permission.CLEAR_APP_USER_DATA"/>
+    <uses-permission android:name="android.permission.SET_PREFERRED_APPLICATIONS"/>
+    <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE"/>
+    <uses-permission android:name="android.permission.MANAGE_NETWORK_POLICY"/>
+    <uses-permission android:name="android.permission.MANAGE_USB"/>
+    <uses-permission android:name="android.permission.MODIFY_PHONE_STATE"/>
+    <uses-permission android:name="android.permission.LOCAL_MAC_ADDRESS"/>
+    <uses-permission android:name="android.permission.FORCE_STOP_PACKAGES"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_NETWORK_USAGE_HISTORY"/>
+    <uses-permission android:name="android.permission.CONNECTIVITY_INTERNAL"/>
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"/>
+    <uses-permission android:name="android.permission.SET_TIME"/>
+    <uses-permission android:name="android.permission.SET_TIME_ZONE"/>
+    <uses-permission android:name="android.permission.DUMP"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.BIND_DEVICE_ADMIN"/>
+    <uses-permission android:name="android.permission.MANAGE_DEVICE_ADMINS"/>
+    <uses-permission android:name="android.permission.COPY_PROTECTED_DATA"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.UPDATE_APP_OPS_STATS"/>
+    <uses-permission android:name="android.permission.DEVICE_POWER"/>
+    <uses-permission android:name="android.permission.MANAGE_ACTIVITY_STACKS"/>
+    <uses-permission android:name="android.permission.STOP_APP_SWITCHES"/>
+    <uses-permission android:name="android.permission.WRITE_CONTACTS"/>
+    <uses-permission android:name="android.permission.READ_CONTACTS"/>
+    <uses-permission android:name="jp.kyocera.mamorinoapp.permission.MAMORINO_CONTROL"/>
+    <uses-permission android:name="jp.kyocera.permission.CONTROL_KEY_EVENT"/>
+    <uses-permission android:name="android.permission.STATUS_BAR"/>
     <uses-sdk
         android:minSdkVersion="22"
         android:targetSdkVersion="22"/>
-    <original-package android:name="com.google.android.backup"/>
-    <uses-permission android:name="android.permission.MODIFY_NETWORK_ACCOUNTING"/>
-    <uses-permission android:name="android.permission.READ_SYNC_SETTINGS"/>
-    <uses-permission android:name="android.permission.WRITE_SETTINGS"/>
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-    <uses-permission android:name="android.permission.GET_ACCOUNTS"/>
-    <uses-permission android:name="android.permission.BACKUP"/>
-    <uses-permission android:name="com.google.android.providers.gsf.permission.READ_GSERVICES"/>
-    <uses-permission android:name="android.permission.USE_CREDENTIALS"/>
+    <permission
+        android:name="com.redbend.client.permission.EVENT_INTENT"
+        android:protectionLevel="signatureOrSystem"
+        android:description="@string/event_intent_permission_description"/>
+    <permission
+        android:name="com.redbend.client.permission.ACCESS_PERMISSION_LIST"
+        android:protectionLevel="signatureOrSystem"/>
     <application
+        android:theme="@android:style/Theme.DeviceDefault.Light"
         android:label="@string/app_name"
-        android:process="com.google.process.location">
+        android:icon="@drawable/ic_launcher_rb"
+        android:name="Globals"
+        android:manageSpaceActivity="com.redbend.client.ManageSpaceActivity"
+        android:allowClearUserData="true"
+        android:persistent="true"
+        android:allowBackup="false">
+        <provider
+            android:name="com.redbend.client.DmcProvider"
+            android:permission="com.redbend.client.permission.ACCESS_PERMISSION_LIST"
+            android:exported="true"
+            android:authorities="com.redbend.client.provider"/>
         <service
-            android:name="com.google.android.backup.BackupTransportService"
-            android:permission="android.permission.CONFIRM_FULL_BACKUP"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.backup.TRANSPORT_HOST"/>
-            </intent-filter>
-        </service>
+            android:name="com.redbend.client.BasicService"
+            android:exported="false"
+            android:stopWithTask="false"/>
         <service
-            android:name="com.google.android.backup.SetBackupAccountService"
-            android:permission="android.permission.BACKUP"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.google.android.backup.SetBackupAccount"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-            </intent-filter>
-        </service>
+            android:name="com.redbend.client.ClientService"
+            android:exported="false"
+            android:stopWithTask="false"/>
         <activity
-            android:theme="@android:style/Theme.Material.Light.Dialog"
-            android:label="@string/header_set_backup_account"
-            android:name="com.google.android.backup.SetBackupAccountActivity"
-            android:excludeFromRecents="true">
+            android:theme="@android:style/Theme.NoDisplay"
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.StartupActivity"
+            android:exported="true"
+            android:configChanges="screenSize|orientation|keyboardHidden">
             <intent-filter>
-                <action android:name="com.google.android.backup.SetBackupAccountActivity"/>
-                <category android:name="android.intent.category.DEFAULT"/>
+                <action android:name="android.intent.action.MAIN"/>
             </intent-filter>
         </activity>
-        <service
-            android:name="com.google.android.backup.BeginBackupService"
-            android:permission="android.permission.BACKUP"
+        <activity
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.AdminRequestActivity"
             android:exported="true">
             <intent-filter>
-                <action android:name="android.intent.action.START_RESTORE"/>
-                <category android:name="android.intent.category.DEFAULT"/>
+                <action android:name="android.intent.action.MAIN"/>
             </intent-filter>
-        </service>
-        <service
-            android:name="com.google.android.backup.BackupEnabler"
-            android:permission="android.permission.BACKUP"
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:scheme="redbend"/>
+            </intent-filter>
+        </activity>
+        <activity
+            android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"
+            android:name="com.redbend.client.LockScreenActivity"
+            android:excludeFromRecents="true"
+            android:screenOrientation="portrait"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+        <activity
+            android:theme="@android:style/Theme.DeviceDefault.Light"
+            android:name="com.redbend.client.LocationScreenActivity"
+            android:excludeFromRecents="true"
+            android:screenOrientation="portrait"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+        <service android:name="com.redbend.client.ScreenControlService"/>
+        <activity
+            android:theme="@android:style/Theme.NoDisplay"
+            android:label="@string/app_name"
+            android:name="com.redbend.client.DebugActivity"
+            android:configChanges="screenSize|orientation|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.redbend.client.ManageSpaceActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+        <activity
+            android:name="com.redbend.client.ui.StartupUserUpdate"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+        <activity
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.LoadingActivity"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+        <activity
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.ErrorHandler"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.uialerts.ConfirmUIAlert"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.uialerts.InfoUIAlert"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.uialerts.InputUIAlert"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/scomo_title"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.ScomoDownloadConfirm"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/scomo_title"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.ScomoInstallConfirm"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/scomo_title"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.ScomoDownloadProgress"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/scomo_title"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.ScomoDownloadInterrupted"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/scomo_title"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.ScomoCanceledConfirm"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/scomo_title"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.ScomoDownloadSuspend"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/scomo_title"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.ScomoInstallProgress"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/scomo_title"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.ScomoInstallDone"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/scomo_title"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.BatteryLow"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/scomo_title"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.ScomoPostponeConfirm"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.LawmoWipeResult"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.LawmoLockResult"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.RequestReboot"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.RequestRebootConfirm"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.swm_common.permissions.PermissionManager"
+            android:exported="false"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+        <activity
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.swm_common.permissions.PermissionHandler"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/descmo_title"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.descmo.ui.DescmoOperationHandler"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:label="@string/descmo_title"
+            android:icon="@drawable/ic_launcher_rb"
+            android:name="com.redbend.client.ui.LogsGettingResultHandler"
+            android:exported="false"
+            android:configChanges="screenSize|orientation"/>
+        <activity
+            android:theme="@android:style/Theme.Translucent"
+            android:name="com.redbend.client.descmo.kddi.ActionRemoteLaunchAppHandlerBase.TempActivity"
+            android:exported="false"/>
+        <receiver
+            android:name="com.redbend.client.DmcSMSReceiver"
+            android:enabled="true"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.google.android.backup.BackupEnabler"/>
-                <category android:name="android.intent.category.DEFAULT"/>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.redbend.client.DmcWapReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.WAP_PUSH_RECEIVED"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.redbend.client.DmcBootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.redbend.client.DmcSIMReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SIM_STATE_CHANGED"/>
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.redbend.client.swm_common.DmcDeviceAdminReceiver"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:enabled="true"
+            android:exported="true">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/dev_admin"/>
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/>
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.redbend.client.ScomoAlarmReceiver"
+            android:exported="true"/>
+        <receiver
+            android:name="com.redbend.client.DeviceUpdateReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.redbend.client.DEVICE_EMERGENCY_START"/>
+                <action android:name="com.redbend.client.DEVICE_EMERGENCY_END"/>
+                <action android:name="com.redbend.client.ENABLE_PERIODIC_CHECK_FOR_UPDATES"/>
+                <action android:name="com.redbend.client.DISABLE_PERIODIC_CHECK_FOR_UPDATES"/>
+                <action android:name="com.redbend.client.CHANGE_PERIODIC_CHECK_FOR_UPDATES"/>
+                <action android:name="com.redbend.client.CHECK_FOR_UPDATES_NOW"/>
+                <action android:name="com.redbend.client.START_APPLICATION"/>
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.redbend.client.PackageManagerReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.redbend.client.action.PACKAGE_REMOVED"/>
+                <action android:name="android.intent.action.PACKAGE_ADDED"/>
+                <action android:name="android.intent.action.PACKAGE_REMOVED"/>
+                <action android:name="android.intent.action.PACKAGE_CHANGED"/>
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.redbend.client.DeviceConflictReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.redbend.client.VOICE_CALL_START"/>
+                <action android:name="com.redbend.client.VOICE_CALL_END"/>
+                <action android:name="jp.kyocera.mamonrinoapp.NOTIFY_START_BUZZER"/>
+                <action android:name="jp.kyocera.mamorinoapp.ACTION_END_BUZZER"/>
+                <action android:name="com.redbend.client.REMOTE_LOCK_START"/>
+                <action android:name="com.redbend.client.REMOTE_LOCK_END"/>
+                <action android:name="com.android.server.power.action.PSEUDO_POWER_OFF"/>
+                <action android:name="com.android.server.power.action.PSEUDO_POWER_ON"/>
+            </intent-filter>
+        </receiver>
+        <service
+            android:name="com.redbend.sysupdater.UpdateService"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.redbend.sysupdater.START_SERVICE"/>
+                <action android:name="com.redbend.sysupdater.END_SERVICE"/>
+                <action android:name="com.redbend.sysupdater.START_UPDATE"/>
+                <action android:name="com.redbend.sysupdater.GET_STATUS"/>
+                <action android:name="com.redbend.sysupdater.CLEAR_STATUS"/>
             </intent-filter>
         </service>
     </application>
