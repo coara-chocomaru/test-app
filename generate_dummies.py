@@ -1,155 +1,301 @@
 #!/usr/bin/env python3
-import xml.etree.ElementTree as ET
+# -*- coding: utf-8 -*-
+"""
+Janus payload stub generator for com.redbend.client target.
+
+- AndroidManifest.xml を読み、宣言されている activity / service /
+  receiver / provider を走査して、それぞれのスタブ Java ソースを
+  `src/` 配下に生成する。
+- SKIP_CLASSES に載せた FQN は生成しない (手動で実装を提供する
+  クラス用。今回は AdminRequestActivity が該当)。
+- Inner class (Outer.Inner 形式) は Outer.java 内に
+  `public static class Inner` としてネストさせる。
+- <application android:name="..."> はスタブ対象外。
+
+使い方:
+    python3 generate_dummies.py
+
+出力例:
+    src/com/redbend/client/StartupActivity.java
+    src/com/redbend/client/descmo/kddi/ActionRemoteLaunchAppHandlerBase.java
+"""
+
 import os
+import sys
+import xml.etree.ElementTree as ET
 
-MANIFEST = "AndroidManifest.xml"
-OUTPUT_DIR = "src"
-PACKAGE = "com.google.android.backup"
+MANIFEST    = "AndroidManifest.xml"
+OUTPUT_DIR  = "src"
+DEFAULT_PKG = "com.redbend.client"
 
-# 手動で提供するクラス（スキップ）
-SKIP_CLASSES = [
-    "com.google.android.backup.BackupTransportService",  # 以前エラーになったが、今回は不要
-    "com.google.android.backup.SetBackupAccountActivity" # カスタム実装を使用
-]
-
-ns = {'android': 'http://schemas.android.com/apk/res/android'}
-
-SUPER_CLASSES = {
-    'activity': 'android.app.Activity',
-    'service': 'android.app.Service',
-    'receiver': 'android.content.BroadcastReceiver',
-    'provider': 'android.content.ContentProvider'
+# 手動で実装を提供する FQN (スタブ生成しない)
+SKIP_CLASSES = {
+    "com.redbend.client.AdminRequestActivity",
 }
 
-# 各コンポーネントのボディ（最小限）
-ACTIVITY_BODY = """
+ANDROID_NS = "http://schemas.android.com/apk/res/android"
+
+SUPER_CLASSES = {
+    "activity": "android.app.Activity",
+    "service":  "android.app.Service",
+    "receiver": "android.content.BroadcastReceiver",
+    "provider": "android.content.ContentProvider",
+}
+
+# ---------------------------------------------------------------------------
+# 各コンポーネントの最小ボディ
+# ---------------------------------------------------------------------------
+
+BODY_ACTIVITY = """
     @Override
     protected void onCreate(android.os.Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
     }
 """
 
-SERVICE_BODY = """
+BODY_SERVICE = """
     @Override
     public void onCreate() {
         super.onCreate();
     }
+
     @Override
     public android.os.IBinder onBind(android.content.Intent intent) {
         return null;
     }
 """
 
-RECEIVER_BODY = """
+BODY_RECEIVER = """
     @Override
     public void onReceive(android.content.Context context, android.content.Intent intent) {
     }
 """
 
-PROVIDER_BODY = """
+BODY_PROVIDER = """
     @Override
     public boolean onCreate() {
         return true;
     }
+
     @Override
-    public android.database.Cursor query(android.net.Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
+    public android.database.Cursor query(android.net.Uri uri,
+                                          String[] projection,
+                                          String selection,
+                                          String[] selectionArgs,
+                                          String sortOrder) {
         return null;
     }
+
     @Override
     public String getType(android.net.Uri uri) {
         return null;
     }
+
     @Override
-    public android.net.Uri insert(android.net.Uri uri, android.content.ContentValues values) {
+    public android.net.Uri insert(android.net.Uri uri,
+                                   android.content.ContentValues values) {
         return null;
     }
+
     @Override
-    public int delete(android.net.Uri uri, String selection, String[] selectionArgs) {
+    public int delete(android.net.Uri uri,
+                       String selection,
+                       String[] selectionArgs) {
         return 0;
     }
+
     @Override
-    public int update(android.net.Uri uri, android.content.ContentValues values, String selection, String[] selectionArgs) {
+    public int update(android.net.Uri uri,
+                       android.content.ContentValues values,
+                       String selection,
+                       String[] selectionArgs) {
         return 0;
     }
 """
 
 BODY_MAP = {
-    'activity': ACTIVITY_BODY,
-    'service': SERVICE_BODY,
-    'receiver': RECEIVER_BODY,
-    'provider': PROVIDER_BODY
+    "activity": BODY_ACTIVITY,
+    "service":  BODY_SERVICE,
+    "receiver": BODY_RECEIVER,
+    "provider": BODY_PROVIDER,
 }
 
-def get_full_class_name(name):
-    if name.startswith('.'):
-        return PACKAGE + name
+IMPORTS_MAP = {
+    "activity": ["android.app.Activity", "android.os.Bundle"],
+    "service":  ["android.app.Service", "android.os.IBinder", "android.content.Intent"],
+    "receiver": ["android.content.BroadcastReceiver",
+                 "android.content.Context",
+                 "android.content.Intent"],
+    "provider": ["android.content.ContentProvider",
+                 "android.database.Cursor",
+                 "android.net.Uri",
+                 "android.content.ContentValues"],
+}
+
+COMPONENT_TAGS = ("activity", "service", "receiver", "provider")
+
+
+# ---------------------------------------------------------------------------
+# ヘルパ
+# ---------------------------------------------------------------------------
+
+def manifest_package(root):
+    pkg = root.get("package")
+    return pkg if pkg else DEFAULT_PKG
+
+
+def qualify(name, pkg):
+    """android:name を完全修飾 Java クラス名に正規化する。"""
+    if not name:
+        return name
+    if name.startswith("."):
+        return pkg + name
+    if "." not in name:
+        # 先頭ドット無し・ドット無し → manifest package 相対
+        return pkg + "." + name
     return name
 
-def get_imports(tag):
-    imports = []
-    if tag in ('activity', 'activity-alias'):
-        imports.extend(['android.app.Activity', 'android.os.Bundle'])
-    elif tag == 'service':
-        imports.extend(['android.app.Service', 'android.os.IBinder', 'android.content.Intent'])
-    elif tag == 'receiver':
-        imports.extend(['android.content.BroadcastReceiver', 'android.content.Context', 'android.content.Intent'])
-    elif tag == 'provider':
-        imports.extend(['android.content.ContentProvider', 'android.database.Cursor', 'android.net.Uri', 'android.content.ContentValues'])
-    return list(set(imports))
 
-def generate_class(full_name, tag):
-    if full_name in SKIP_CLASSES:
-        print(f"Skipping {full_name} (manual file provided)")
-        return None
+def split_class_hierarchy(full_name):
+    """
+    完全修飾名を (package, [outer_classes...], simple_name) に分解。
 
-    pkg = '.'.join(full_name.split('.')[:-1])
-    simple = full_name.split('.')[-1]
-    super_cls = SUPER_CLASSES.get(tag, 'android.app.Activity')
-    body = BODY_MAP.get(tag, '')
-    imports = get_imports(tag)
-    import_lines = '\n'.join([f'import {imp};' for imp in imports if imp != super_cls])
+    例:
+      com.redbend.client.AdminRequestActivity
+          -> ("com.redbend.client", [], "AdminRequestActivity")
 
-    content = f"""package {pkg};
+      com.redbend.client.descmo.kddi.ActionRemoteLaunchAppHandlerBase.TempActivity
+          -> ("com.redbend.client.descmo.kddi",
+              ["ActionRemoteLaunchAppHandlerBase"],
+              "TempActivity")
+    """
+    parts = full_name.split(".")
+    # 最初に現れる PascalCase 部分をクラス階層の起点とみなす
+    first_class_idx = len(parts) - 1
+    for i, part in enumerate(parts):
+        if part and part[0].isupper():
+            first_class_idx = i
+            break
+    package = ".".join(parts[:first_class_idx])
+    class_chain = parts[first_class_idx:]
+    return package, class_chain[:-1], class_chain[-1]
 
-{import_lines}
 
-public class {simple} extends {super_cls} {{
-{body}
-}}"""
-    return content
+def import_block(tag, super_cls):
+    lines = []
+    for imp in IMPORTS_MAP.get(tag, []):
+        if imp != super_cls:
+            lines.append("import " + imp + ";")
+    return "\n".join(lines)
+
+
+def render_simple(pkg, simple, tag):
+    super_cls = SUPER_CLASSES[tag]
+    body = BODY_MAP[tag]
+    return (
+        "package " + pkg + ";\n"
+        "\n"
+        + import_block(tag, super_cls) + "\n"
+        "\n"
+        "public class " + simple + " extends " + super_cls + " {\n"
+        + body + "\n"
+        "}\n"
+    )
+
+
+def write_file(rel_path, content):
+    full = os.path.join(OUTPUT_DIR, rel_path)
+    d = os.path.dirname(full)
+    if d and not os.path.isdir(d):
+        os.makedirs(d, exist_ok=True)
+    if os.path.exists(full):
+        print("Skip (already exists): " + full)
+        return
+    with open(full, "w") as f:
+        f.write(content)
+    print("Generated: " + full)
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
 
 def main():
+    if not os.path.isfile(MANIFEST):
+        print("Manifest not found: " + MANIFEST)
+        sys.exit(1)
+
     tree = ET.parse(MANIFEST)
     root = tree.getroot()
+    pkg = manifest_package(root)
+    print("Manifest package: " + pkg)
 
-    app = root.find('application')
+    app = root.find("application")
     if app is None:
-        print("No <application> found")
-        return
+        print("No <application> element, aborting")
+        sys.exit(1)
 
-    components = []
-    for tag in ['activity', 'service', 'receiver', 'provider']:
+    # inner クラスを outer 単位にまとめる
+    # key = (pkg, outer_simple) / value = list of (inner_simple, tag)
+    inner_groups = {}
+
+    for tag in COMPONENT_TAGS:
         for elem in app.findall(tag):
-            name = elem.get('{http://schemas.android.com/apk/res/android}name')
-            if name:
-                full = get_full_class_name(name)
-                components.append((tag, full))
+            raw = elem.get("{" + ANDROID_NS + "}name")
+            if not raw:
+                continue
+            full = qualify(raw, pkg)
 
-    for tag, full in components:
-        content = generate_class(full, tag)
-        if content is None:
-            continue
-        pkg = '.'.join(full.split('.')[:-1])
-        simple = full.split('.')[-1]
-        dir_path = os.path.join(OUTPUT_DIR, pkg.replace('.', '/'))
-        os.makedirs(dir_path, exist_ok=True)
-        file_path = os.path.join(dir_path, f"{simple}.java")
-        if os.path.exists(file_path):
-            print(f"File {file_path} already exists, skipping")
-        else:
-            with open(file_path, 'w') as f:
-                f.write(content)
-            print(f"Generated: {full}")
+            if full in SKIP_CLASSES:
+                print("Skip (manual impl): " + full)
+                continue
+
+            comp_pkg, outer_chain, simple = split_class_hierarchy(full)
+
+            if not outer_chain:
+                rel = comp_pkg.replace(".", "/") + "/" + simple + ".java"
+                write_file(rel, render_simple(comp_pkg, simple, tag))
+            else:
+                outer = outer_chain[-1]
+                key = (comp_pkg, outer)
+                inner_groups.setdefault(key, []).append((simple, tag))
+
+    # inner クラス群を outer ファイルとして書き出す
+    for (comp_pkg, outer), inners in inner_groups.items():
+        # outer は特定の親型を持たないスタブとして生成
+        # (manifest 上で outer は型指定されない)
+        chunks = []
+        used_super = None
+        for simple, tag in inners:
+            if used_super is None:
+                used_super = SUPER_CLASSES[tag]
+            body = BODY_MAP[tag]
+            chunks.append(
+                "    public static class " + simple + " extends "
+                + SUPER_CLASSES[tag] + " {\n"
+                + body
+                + "\n    }\n"
+            )
+
+        # import は最初の inner の tag から流用 (Adapter が複数 tag で
+        # 混在するケースは実運用上ないため)
+        first_tag = inners[0][1]
+        imports_lines = import_block(first_tag, SUPER_CLASSES[first_tag])
+
+        content = (
+            "package " + comp_pkg + ";\n"
+            "\n"
+            + imports_lines + "\n"
+            "\n"
+            "public class " + outer + " {\n"
+            + "\n".join(chunks)
+            + "}\n"
+        )
+        rel = comp_pkg.replace(".", "/") + "/" + outer + ".java"
+        write_file(rel, content)
+
+    print("Done.")
+
 
 if __name__ == "__main__":
     main()
