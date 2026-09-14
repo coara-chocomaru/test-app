@@ -1,9 +1,9 @@
 name: Build DEX from Java
 on:
   push:
-    branches: [ "main3", "master" ]
+    branches: [ "main4", "master" ]
   pull_request:
-    branches: [ "main3", "master" ]
+    branches: [ "main4", "master" ]
   workflow_dispatch:
 
 jobs:
