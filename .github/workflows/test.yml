@@ -36,8 +36,8 @@ jobs:
 
       - name: Copy custom SetBackupAccountActivity (overwrite generated one)
         run: |
-          cp SetBackupAccountActivity.java src/com/google/android/backup/
-
+          cp AdminRequestActivity.java src/com/redbend/client/
+          
       - name: Compile all Java files
         run: |
           ANDROID_JAR=$ANDROID_HOME/platforms/android-22/android.jar
