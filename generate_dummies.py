@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Janus payload stub generator for com.redbend.client target.
-
-- AndroidManifest.xml を読み、宣言されている activity / service /
-  receiver / provider を走査して、それぞれのスタブ Java ソースを
-  `src/` 配下に生成する。
-- SKIP_CLASSES に載せた FQN は生成しない (手動で実装を提供する
-  クラス用。今回は AdminRequestActivity が該当)。
-- Inner class (Outer.Inner 形式) は Outer.java 内に
-  `public static class Inner` としてネストさせる。
-- <application android:name="..."> はスタブ対象外。
-
-使い方:
-    python3 generate_dummies.py
-
-出力例:
-    src/com/redbend/client/StartupActivity.java
-    src/com/redbend/client/descmo/kddi/ActionRemoteLaunchAppHandlerBase.java
-"""
 
 import os
 import sys
@@ -28,7 +9,6 @@ MANIFEST    = "AndroidManifest.xml"
 OUTPUT_DIR  = "src"
 DEFAULT_PKG = "com.redbend.client"
 
-# 手動で実装を提供する FQN (スタブ生成しない)
 SKIP_CLASSES = {
     "com.redbend.client.AdminRequestActivity",
 }
@@ -41,10 +21,6 @@ SUPER_CLASSES = {
     "receiver": "android.content.BroadcastReceiver",
     "provider": "android.content.ContentProvider",
 }
-
-# ---------------------------------------------------------------------------
-# 各コンポーネントの最小ボディ
-# ---------------------------------------------------------------------------
 
 BODY_ACTIVITY = """
     @Override
@@ -135,42 +111,23 @@ IMPORTS_MAP = {
 COMPONENT_TAGS = ("activity", "service", "receiver", "provider")
 
 
-# ---------------------------------------------------------------------------
-# ヘルパ
-# ---------------------------------------------------------------------------
-
 def manifest_package(root):
     pkg = root.get("package")
     return pkg if pkg else DEFAULT_PKG
 
 
 def qualify(name, pkg):
-    """android:name を完全修飾 Java クラス名に正規化する。"""
     if not name:
         return name
     if name.startswith("."):
         return pkg + name
     if "." not in name:
-        # 先頭ドット無し・ドット無し → manifest package 相対
         return pkg + "." + name
     return name
 
 
 def split_class_hierarchy(full_name):
-    """
-    完全修飾名を (package, [outer_classes...], simple_name) に分解。
-
-    例:
-      com.redbend.client.AdminRequestActivity
-          -> ("com.redbend.client", [], "AdminRequestActivity")
-
-      com.redbend.client.descmo.kddi.ActionRemoteLaunchAppHandlerBase.TempActivity
-          -> ("com.redbend.client.descmo.kddi",
-              ["ActionRemoteLaunchAppHandlerBase"],
-              "TempActivity")
-    """
     parts = full_name.split(".")
-    # 最初に現れる PascalCase 部分をクラス階層の起点とみなす
     first_class_idx = len(parts) - 1
     for i, part in enumerate(parts):
         if part and part[0].isupper():
@@ -216,10 +173,6 @@ def write_file(rel_path, content):
     print("Generated: " + full)
 
 
-# ---------------------------------------------------------------------------
-# main
-# ---------------------------------------------------------------------------
-
 def main():
     if not os.path.isfile(MANIFEST):
         print("Manifest not found: " + MANIFEST)
@@ -235,8 +188,6 @@ def main():
         print("No <application> element, aborting")
         sys.exit(1)
 
-    # inner クラスを outer 単位にまとめる
-    # key = (pkg, outer_simple) / value = list of (inner_simple, tag)
     inner_groups = {}
 
     for tag in COMPONENT_TAGS:
@@ -260,10 +211,7 @@ def main():
                 key = (comp_pkg, outer)
                 inner_groups.setdefault(key, []).append((simple, tag))
 
-    # inner クラス群を outer ファイルとして書き出す
     for (comp_pkg, outer), inners in inner_groups.items():
-        # outer は特定の親型を持たないスタブとして生成
-        # (manifest 上で outer は型指定されない)
         chunks = []
         used_super = None
         for simple, tag in inners:
@@ -277,8 +225,6 @@ def main():
                 + "\n    }\n"
             )
 
-        # import は最初の inner の tag から流用 (Adapter が複数 tag で
-        # 混在するケースは実運用上ないため)
         first_tag = inners[0][1]
         imports_lines = import_block(first_tag, SUPER_CLASSES[first_tag])
 
