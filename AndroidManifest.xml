@@ -1,70 +1,397 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     android:sharedUserId="com.google.uid.shared"
-    android:versionCode="22"
-    android:versionName="5.1-1743759"
-    package="com.google.android.backuptransport"
-    platformBuildVersionCode="22"
-    platformBuildVersionName="5.1-1743759">
+    android:versionCode="3027110"
+    android:versionName="3.0.27 (599131-10)"
+    package="com.google.android.gms">
     <uses-sdk
-        android:minSdkVersion="22"
-        android:targetSdkVersion="22"/>
-    <original-package android:name="com.google.android.backup"/>
-    <uses-permission android:name="android.permission.MODIFY_NETWORK_ACCOUNTING"/>
-    <uses-permission android:name="android.permission.READ_SYNC_SETTINGS"/>
-    <uses-permission android:name="android.permission.WRITE_SETTINGS"/>
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+        android:minSdkVersion="8"
+        android:targetSdkVersion="17"/>
     <uses-permission android:name="android.permission.GET_ACCOUNTS"/>
-    <uses-permission android:name="android.permission.BACKUP"/>
-    <uses-permission android:name="com.google.android.providers.gsf.permission.READ_GSERVICES"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.USE_CREDENTIALS"/>
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="com.google.android.providers.gsf.permission.READ_GSERVICES"/>
+    <permission
+        android:name="com.google.android.gms.permission.C2D_MESSAGE"
+        android:protectionLevel="signature"/>
+    <uses-permission android:name="com.google.android.gms.permission.C2D_MESSAGE"/>
+    <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE"/>
+    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS"/>
+    <uses-permission android:name="android.permission.AUTHENTICATE_ACCOUNTS"/>
+    <uses-permission android:name="android.permission.DUMP"/>
+    <uses-permission android:name="android.permission.MANAGE_ACCOUNTS"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.WRITE_SETTINGS"/>
+    <uses-permission android:name="com.google.android.providers.settings.permission.READ_GSETTINGS"/>
+    <uses-permission android:name="com.google.android.providers.settings.permission.WRITE_GSETTINGS"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.READ_SYNC_SETTINGS"/>
+    <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_CONTACTS"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <application
-        android:label="@string/app_name"
-        android:process="com.google.process.location">
-        <service
-            android:name="com.google.android.backup.BackupTransportService"
-            android:permission="android.permission.CONFIRM_FULL_BACKUP"
-            android:exported="true">
+        android:label="@string/common_app_name"
+        android:icon="@drawable/common_ic_googleplayservices"
+        android:name="com.google.android.gms.common.app.GmsApplication">
+        <activity
+            android:theme="@style/DialogThemeOnV11"
+            android:label="@string/common_choose_account_label"
+            android:name="com.google.android.gms.common.account.AccountPickerActivity"
+            android:exported="true"
+            android:process="com.google.android.gms.ui"
+            android:excludeFromRecents="true">
             <intent-filter>
-                <action android:name="android.backup.TRANSPORT_HOST"/>
+                <action android:name="com.google.android.gms.common.account.CHOOSE_ACCOUNT"/>
+                <category android:name="android.intent.category.DEFAULT"/>
             </intent-filter>
-        </service>
+        </activity>
+        <activity
+            android:theme="@style/DialogWhenLargeOnV11"
+            android:label="@string/common_choose_account_label"
+            android:name="com.google.android.gms.common.account.AccountTypePickerActivity"
+            android:process="com.google.android.gms.ui"
+            android:excludeFromRecents="true"/>
         <service
-            android:name="com.google.android.backup.SetBackupAccountService"
-            android:permission="android.permission.BACKUP"
+            android:name="com.google.android.gms.common.push.PushNotificationIntentService"
+            android:exported="false"/>
+        <receiver android:name="com.google.android.gms.common.images.ImageBroadcastReceiver">
+            <intent-filter>
+                <action android:name="com.google.android.gms.common.images.LOAD_IMAGE"/>
+            </intent-filter>
+        </receiver>
+        <service
+            android:name="com.google.android.gms.common.images.ImageMultiThreadedIntentService"
+            android:exported="false"/>
+        <receiver android:name="com.google.android.gms.common.receiver.SystemBroadcastReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_REMOVED"/>
+                <action android:name="android.intent.action.PACKAGE_DATA_CLEARED"/>
+                <data android:scheme="package"/>
+            </intent-filter>
+        </receiver>
+        <service
+            android:name="com.google.android.gms.recovery.AccountRecoveryService"
+            android:process="com.google.android.gsf.login"/>
+        <receiver android:name="com.google.android.gms.recovery.AccountRecoveryService.Receiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="com.google.android.gms.INITIALIZE"/>
+                <action android:name="com.google.android.gms.recovery.WAKEUP"/>
+            </intent-filter>
+        </receiver>
+        <activity
+            android:theme="@style/AccountRecoveryActivity"
+            android:name="com.google.android.gms.recovery.AccountRecoveryActivity"
+            android:exported="true"
+            android:process="com.google.android.gsf.login"/>
+        <service
+            android:name="com.google.android.gms.auth.GetToken"
+            android:exported="true"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/InvisibleCustomTitle"
+            android:name="com.google.android.gms.auth.TokenActivity"
+            android:exported="true"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/InvisibleCustomTitle"
+            android:label="@string/auth_login_title"
+            android:name="com.google.android.gms.auth.login.LoginActivity"
+            android:exported="true"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/InvisibleCustomTitle"
+            android:label="@string/auth_login_title"
+            android:name=".auth.login.GoogleLoginActivity"
+            android:exported="true"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/CaptchaActivity"
+            android:label="@string/auth_captcha_title"
+            android:name="com.google.android.gms.auth.login.CaptchaActivity"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/LoginActivity"
+            android:label="@string/auth_login_title"
+            android:name="com.google.android.gms.auth.login.UsernamePasswordActivity"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/LoginActivityTask"
+            android:label="@string/auth_login_task_title"
+            android:name="com.google.android.gms.auth.login.LoginActivityTask"
+            android:process="com.google.android.gsf.login"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+        <activity
+            android:theme="@style/NoTitleInXL"
+            android:label="@string/auth_show_error_title"
+            android:name="com.google.android.gms.auth.login.ShowErrorActivity"
+            android:exported="true"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/BrowserTheme"
+            android:label="@string/auth_gls_ui_add_account_title"
+            android:name="com.google.android.gms.auth.login.BrowserActivity"
+            android:exported="true"
+            android:process="com.google.android.gsf.login"
+            android:configChanges="orientation|keyboardHidden|keyboard"/>
+        <activity
+            android:theme="@style/common.Activity.Light.Dialog"
+            android:label="@string/auth_grant_credentials_activity_title"
+            android:name="com.google.android.gms.auth.login.GrantCredentialsWithAclActivity"
+            android:exported="true"
+            android:process="com.google.android.gsf.login"
+            android:excludeFromRecents="true"/>
+        <activity
+            android:theme="@style/CustomTitle"
+            android:label="@string/auth_setup_wizard_title"
+            android:name=".auth.login.SetupWirelessActivity"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/InvisibleCustomTitle"
+            android:name="com.google.android.gms.plus.PlusActivity"
+            android:exported="true"
+            android:process="com.google.android.gsf.login"
+            android:finishOnTaskLaunch="true"/>
+        <activity
+            android:theme="@style/NameActivity"
+            android:label="@string/auth_name_title"
+            android:name="com.google.android.gms.plus.UnifiedSetupActivity"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/PlusFaqActivity"
+            android:label="@string/auth_plus_faq_title"
+            android:name="com.google.android.gms.plus.PicasaInfoActivity"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/BadNameActivity"
+            android:label="@string/auth_bad_name_title"
+            android:name="com.google.android.gms.plus.BadNameActivity"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/LearnMoreActivity"
+            android:label="@string/auth_learn_more_title"
+            android:name="com.google.android.gms.plus.LearnMoreActivity"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/NoTitleInXL"
+            android:label="@string/auth_setup_wizard_title"
+            android:name=".plus.PicassaInfoActivity"
+            android:process="com.google.android.gsf.login"/>
+        <activity
+            android:theme="@style/common.LightDialogWhenLargeOnV11.NoTitleBar"
+            android:label="@string/app_settings_activity_label"
+            android:icon="@drawable/plus_icon"
+            android:name="com.google.android.gms.plus.apps.ListAppsActivity"
+            android:exported="true"
+            android:process="com.google.android.gms.ui">
+            <intent-filter>
+                <action android:name="com.google.android.gms.plus.action.MANAGE_APPS"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
+        <activity
+            android:theme="@style/plus_noTitleDialog"
+            android:name="com.google.android.gms.plus.activity.AccountSignUpActivity"
+            android:exported="false"
+            android:process="com.google.android.gms.ui"/>
+        <activity
+            android:theme="@style/common.Activity.Light.Dialog"
+            android:name="com.google.android.gms.plus.audience.AudienceSelectionActivity"
+            android:exported="false"
+            android:process="com.google.android.gms.ui"
+            android:excludeFromRecents="true"/>
+        <activity
+            android:theme="@style/common.Activity.Light.Dialog.SmallTitle"
+            android:name="com.google.android.gms.plus.audience.CircleSelectionActivity"
+            android:exported="false"
+            android:process="com.google.android.gms.ui"
+            android:excludeFromRecents="true"/>
+        <service
+            android:label="@string/plus_service_title"
+            android:name="com.google.android.gms.plus.service.PlusService"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.google.android.backup.SetBackupAccount"/>
+                <action android:name="com.google.android.gms.plus.service.START"/>
                 <category android:name="android.intent.category.DEFAULT"/>
             </intent-filter>
         </service>
+        <service
+            android:name="com.google.android.gms.plus.service.DefaultIntentService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.android.gms.plus.service.default.INTENT"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </service>
+        <service
+            android:name="com.google.android.gms.plus.service.ImageIntentService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.android.gms.plus.service.image.INTENT"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </service>
+        <service
+            android:name="com.google.android.gms.plus.service.OfflineActionSyncAdapterService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.content.SyncAdapter"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.content.SyncAdapter"
+                android:resource="@xml/offline_action_sync_adapter"/>
+        </service>
+        <provider
+            android:name="com.google.android.gms.plus.provider.PlusProvider"
+            android:exported="false"
+            android:authorities="com.google.android.gms.plus;com.google.android.gms.plus.action"/>
         <activity
-            android:theme="@android:style/Theme.Material.Light.Dialog"
-            android:label="@string/header_set_backup_account"
-            android:name="com.google.android.backup.SetBackupAccountActivity"
+            android:theme="@style/Theme.Plus"
+            android:name="com.google.android.gms.plus.plusone.PlusOneActivity"
+            android:exported="true"
+            android:process="com.google.android.gms.ui"
+            android:windowSoftInputMode="adjustPan|stateHidden"
+            android:logo="@drawable/plus_icon">
+            <intent-filter>
+                <action android:name="com.google.android.gms.plus.action.PLUS_ONE"/>
+                <action android:name="com.google.android.gms.plus.action.UNDO_PLUS_ONE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
+        <activity
+            android:theme="@style/common.LightDialogWhenLargeOnV11.NoTitleBar"
+            android:label="@string/googleads"
+            android:icon="@drawable/ic_google_selected"
+            android:name="com.google.android.gms.ads.settings.AdsSettingsActivity"
+            android:exported="true"
+            android:process="com.google.android.gms.ui"
             android:excludeFromRecents="true">
             <intent-filter>
-                <action android:name="com.google.android.backup.SetBackupAccountActivity"/>
+                <action android:name="com.google.android.gms.settings.ADS_PRIVACY"/>
                 <category android:name="android.intent.category.DEFAULT"/>
             </intent-filter>
         </activity>
         <service
-            android:name="com.google.android.backup.BeginBackupService"
-            android:permission="android.permission.BACKUP"
+            android:name=".dynamic.service.DynamicJarService"
             android:exported="true">
             <intent-filter>
-                <action android:name="android.intent.action.START_RESTORE"/>
+                <action android:name="com.google.android.gms.dynamic.service.START"/>
                 <category android:name="android.intent.category.DEFAULT"/>
             </intent-filter>
         </service>
         <service
-            android:name="com.google.android.backup.BackupEnabler"
-            android:permission="android.permission.BACKUP"
+            android:name="com.google.android.gms.panorama.service.PanoramaAndroidService"
             android:exported="true">
             <intent-filter>
-                <action android:name="com.google.android.backup.BackupEnabler"/>
+                <action android:name="com.google.android.gms.panorama.service.START"/>
                 <category android:name="android.intent.category.DEFAULT"/>
             </intent-filter>
         </service>
+        <activity
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:label="@string/panorama_viewer_title"
+            android:name="com.google.android.gms.panorama.PanoramaViewActivity"
+            android:exported="true"
+            android:configChanges="screenSize|orientation|keyboardHidden"/>
+        <service
+            android:name="com.google.android.gms.icing.impl.IndexService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.icing.INDEX_SERVICE"/>
+            </intent-filter>
+        </service>
+        <receiver android:name="com.google.android.gms.icing.impl.SystemEventReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_REMOVED"/>
+                <action android:name="android.intent.action.PACKAGE_DATA_CLEARED"/>
+                <data android:scheme="package"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.google.android.gms.icing.impl.PowerConnectedReceiver"
+            android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.ACTION_POWER_CONNECTED"/>
+            </intent-filter>
+        </receiver>
+        <service
+            android:name="com.google.android.gms.common.DeprecatedServices"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wallet.service.START"/>
+            </intent-filter>
+        </service>
+        <service
+            android:label="@string/gcm_registration_title"
+            android:name="com.google.android.gms.gcm.PushMessagingRegistrarProxy"
+            android:permission="com.google.android.c2dm.permission.RECEIVE"
+            android:exported="true">
+            <intent-filter android:priority="100">
+                <action android:name="com.google.android.c2dm.intent.REGISTER"/>
+                <action android:name="com.google.android.c2dm.intent.UNREGISTER"/>
+            </intent-filter>
+        </service>
+        <service
+            android:name="com.google.android.gms.gcm.GcmService"
+            android:permission="com.google.android.gtalkservice.permission.GTALK_SERVICE"
+            android:exported="true"/>
+        <receiver
+            android:name="com.google.android.gms.gcm.GcmSenderProxy"
+            android:permission="com.google.android.c2dm.permission.RECEIVE">
+            <intent-filter android:priority="101">
+                <action android:name="com.google.android.c2dm.intent.SEND_DATA_MESSAGE"/>
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.google.android.gms.gcm.GcmReceiver"
+            android:permission="com.google.android.c2dm.permission.SEND">
+            <intent-filter>
+                <action android:name="com.google.android.c2dm.intent.RECEIVE"/>
+                <action android:name="com.google.android.c2dm.intent.REGISTRATION"/>
+                <category android:name="com.google.android.gms"/>
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name="com.google.android.gms.gcm.GcmProxyReceiver"
+            android:permission="com.google.android.gtalkservice.permission.GTALK_SERVICE"
+            android:exported="false"/>
+        <service
+            android:name="com.google.android.gms.gcm.GcmProvisioning"
+            android:permission="com.google.android.gtalkservice.permission.GTALK_SERVICE"
+            android:exported="true"/>
+        <receiver
+            android:name="com.google.android.gms.gcm.ServiceAutoStarter"
+            android:process="com.google.android.gcm">
+            <intent-filter>
+                <action android:name="android.net.conn.CONNECTIVITY_CHANGE"/>
+                <action android:name="com.google.gservices.intent.action.GSERVICES_CHANGED"/>
+                <action android:name="android.net.conn.BACKGROUND_DATA_SETTING_CHANGED"/>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            </intent-filter>
+        </receiver>
+        <activity
+            android:theme="@style/common.LightDialogWhenLargeOnV11.NoTitleBar"
+            android:label="@string/common_google_settings"
+            android:icon="@drawable/common_settings_icon"
+            android:name="com.google.android.gms.common.settings.GoogleSettingsActivity"
+            android:exported="true"
+            android:process="com.google.android.gms.ui">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
     </application>
 </manifest>
