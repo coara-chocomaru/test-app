@@ -2,26 +2,32 @@
 import xml.etree.ElementTree as ET
 import os
 
-MANIFEST = "AndroidManifest.xml"
+MANIFEST   = "AndroidManifest.xml"
 OUTPUT_DIR = "src"
-PACKAGE = "com.google.android.backup"
+PACKAGE    = "com.google.android.gms"
 
-# 手動で提供するクラス（スキップ）
-SKIP_CLASSES = [
-    "com.google.android.backup.BackupTransportService",  # 以前エラーになったが、今回は不要
-    "com.google.android.backup.SetBackupAccountActivity" # カスタム実装を使用
-]
+# 手動提供（改修済み）— 生成しない
+SKIP_CLASSES = {
+    "com.google.android.gms.common.DeprecatedServices",
+}
+
+# マニフェスト上で . 区切りだが Java では内部クラスとして書くもの
+# key: FQCN (manifest), value: (outer_FQCN, inner_simple)
+NESTED_CLASSES = {
+    "com.google.android.gms.recovery.AccountRecoveryService.Receiver":
+        ("com.google.android.gms.recovery.AccountRecoveryService", "Receiver"),
+}
 
 ns = {'android': 'http://schemas.android.com/apk/res/android'}
 
 SUPER_CLASSES = {
-    'activity': 'android.app.Activity',
-    'service': 'android.app.Service',
-    'receiver': 'android.content.BroadcastReceiver',
-    'provider': 'android.content.ContentProvider'
+    'activity':       'android.app.Activity',
+    'activity-alias': 'android.app.Activity',
+    'service':        'android.app.Service',
+    'receiver':       'android.content.BroadcastReceiver',
+    'provider':       'android.content.ContentProvider',
 }
 
-# 各コンポーネントのボディ（最小限）
 ACTIVITY_BODY = """
     @Override
     protected void onCreate(android.os.Bundle savedInstanceState) {
@@ -74,82 +80,119 @@ PROVIDER_BODY = """
 """
 
 BODY_MAP = {
-    'activity': ACTIVITY_BODY,
-    'service': SERVICE_BODY,
-    'receiver': RECEIVER_BODY,
-    'provider': PROVIDER_BODY
+    'activity':       ACTIVITY_BODY,
+    'activity-alias': ACTIVITY_BODY,
+    'service':        SERVICE_BODY,
+    'receiver':       RECEIVER_BODY,
+    'provider':       PROVIDER_BODY,
 }
 
-def get_full_class_name(name):
+
+def get_full_class_name(name: str) -> str:
     if name.startswith('.'):
         return PACKAGE + name
     return name
 
-def get_imports(tag):
-    imports = []
+
+def get_imports(tag: str):
     if tag in ('activity', 'activity-alias'):
-        imports.extend(['android.app.Activity', 'android.os.Bundle'])
-    elif tag == 'service':
-        imports.extend(['android.app.Service', 'android.os.IBinder', 'android.content.Intent'])
-    elif tag == 'receiver':
-        imports.extend(['android.content.BroadcastReceiver', 'android.content.Context', 'android.content.Intent'])
-    elif tag == 'provider':
-        imports.extend(['android.content.ContentProvider', 'android.database.Cursor', 'android.net.Uri', 'android.content.ContentValues'])
-    return list(set(imports))
+        return ['android.app.Activity', 'android.os.Bundle']
+    if tag == 'service':
+        return ['android.app.Service', 'android.os.IBinder', 'android.content.Intent']
+    if tag == 'receiver':
+        return ['android.content.BroadcastReceiver', 'android.content.Context', 'android.content.Intent']
+    if tag == 'provider':
+        return ['android.content.ContentProvider', 'android.database.Cursor',
+                'android.net.Uri', 'android.content.ContentValues']
+    return []
 
-def generate_class(full_name, tag):
-    if full_name in SKIP_CLASSES:
-        print(f"Skipping {full_name} (manual file provided)")
-        return None
 
-    pkg = '.'.join(full_name.split('.')[:-1])
-    simple = full_name.split('.')[-1]
-    super_cls = SUPER_CLASSES.get(tag, 'android.app.Activity')
-    body = BODY_MAP.get(tag, '')
-    imports = get_imports(tag)
-    import_lines = '\n'.join([f'import {imp};' for imp in imports if imp != super_cls])
-
-    content = f"""package {pkg};
+def build_source(pkg, simple, super_cls, body, imports, nested_code=""):
+    filtered = sorted({imp for imp in imports if imp != super_cls})
+    import_lines = '\n'.join(f'import {imp};' for imp in filtered)
+    return f"""package {pkg};
 
 {import_lines}
 
 public class {simple} extends {super_cls} {{
 {body}
+{nested_code}
 }}"""
-    return content
+
+
+def write_file(full_name, content):
+    pkg    = '.'.join(full_name.split('.')[:-1])
+    simple = full_name.split('.')[-1]
+    dir_path = os.path.join(OUTPUT_DIR, pkg.replace('.', '/'))
+    os.makedirs(dir_path, exist_ok=True)
+    file_path = os.path.join(dir_path, f"{simple}.java")
+    if os.path.exists(file_path):
+        print(f"File {file_path} already exists, skipping")
+        return False
+    with open(file_path, 'w') as f:
+        f.write(content)
+    print(f"Generated: {full_name}")
+    return True
+
 
 def main():
     tree = ET.parse(MANIFEST)
     root = tree.getroot()
-
-    app = root.find('application')
+    app  = root.find('application')
     if app is None:
         print("No <application> found")
         return
 
+    # (tag, FQCN) をすべて収集
     components = []
-    for tag in ['activity', 'service', 'receiver', 'provider']:
+    for tag in ('activity', 'activity-alias', 'service', 'receiver', 'provider'):
         for elem in app.findall(tag):
             name = elem.get('{http://schemas.android.com/apk/res/android}name')
             if name:
-                full = get_full_class_name(name)
-                components.append((tag, full))
+                components.append((tag, get_full_class_name(name)))
 
+    # outer FQCN ごとにグルーピング
+    grouped = {}
     for tag, full in components:
-        content = generate_class(full, tag)
-        if content is None:
-            continue
-        pkg = '.'.join(full.split('.')[:-1])
-        simple = full.split('.')[-1]
-        dir_path = os.path.join(OUTPUT_DIR, pkg.replace('.', '/'))
-        os.makedirs(dir_path, exist_ok=True)
-        file_path = os.path.join(dir_path, f"{simple}.java")
-        if os.path.exists(file_path):
-            print(f"File {file_path} already exists, skipping")
+        if full in NESTED_CLASSES:
+            outer, inner_simple = NESTED_CLASSES[full]
+            slot = grouped.setdefault(outer, {'tag': None, 'nested': []})
+            slot['nested'].append((tag, inner_simple))
         else:
-            with open(file_path, 'w') as f:
-                f.write(content)
-            print(f"Generated: {full}")
+            slot = grouped.setdefault(full, {'tag': None, 'nested': []})
+            slot['tag'] = tag
+
+    # NESTED 側にしか現れない outer は activity 扱い（通常発生しないがフェイルセーフ）
+    for full, info in grouped.items():
+        if info['tag'] is None:
+            info['tag'] = 'activity'
+
+    for full, info in grouped.items():
+        if full in SKIP_CLASSES:
+            print(f"Skipping {full} (manual file provided)")
+            continue
+
+        tag       = info['tag']
+        super_cls = SUPER_CLASSES.get(tag, 'android.app.Activity')
+        body      = BODY_MAP.get(tag, '')
+        imports   = list(get_imports(tag))
+
+        nested_code = ""
+        for nested_tag, nested_simple in info['nested']:
+            nested_super = SUPER_CLASSES.get(nested_tag, 'android.content.BroadcastReceiver')
+            nested_body  = BODY_MAP.get(nested_tag, '')
+            imports.extend(get_imports(nested_tag))
+            nested_code += f"""
+    public static class {nested_simple} extends {nested_super} {{
+{nested_body}
+    }}
+"""
+
+        pkg    = '.'.join(full.split('.')[:-1])
+        simple = full.split('.')[-1]
+        content = build_source(pkg, simple, super_cls, body, imports, nested_code)
+        write_file(full, content)
+
 
 if __name__ == "__main__":
     main()
