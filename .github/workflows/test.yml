@@ -1,4 +1,5 @@
 name: Build DEX from Java
+
 on:
   push:
     branches: [ "test2", "master" ]
@@ -20,13 +21,13 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Android SDK
+      - name: Set up Android SDK for Android 4.2
         uses: android-actions/setup-android@v3
         with:
           packages: >-
             platform-tools
             build-tools;34.0.0
-            platforms;android-22
+            platforms;android-17
         env:
           SKIP_JDK_VERSION_CHECK: true
 
@@ -36,16 +37,36 @@ jobs:
 
       - name: Compile all Java files
         run: |
-          ANDROID_JAR=$ANDROID_HOME/platforms/android-22/android.jar
+          ANDROID_JAR=$ANDROID_HOME/platforms/android-17/android.jar
           mkdir -p out
+
           find src -name "*.java" > sources.txt
-          javac -cp $ANDROID_JAR -source 1.8 -target 1.8 -d out @sources.txt
+
+          javac \
+            -cp "$ANDROID_JAR" \
+            -source 1.8 \
+            -target 1.8 \
+            -d out \
+            @sources.txt
 
       - name: Convert .class to .dex using d8
         run: |
           D8=$ANDROID_HOME/build-tools/34.0.0/d8
+
           find out -name "*.class" > classes.txt
-          $D8 --lib $ANDROID_HOME/platforms/android-22/android.jar --output . @classes.txt
+
+          "$D8" \
+            --lib "$ANDROID_HOME/platforms/android-17/android.jar" \
+            --min-api 17 \
+            --output . \
+            @classes.txt
+
+      - name: Verify DEX
+        run: |
+          ls -lh classes.dex
+          file classes.dex
+          echo "DEX header:"
+          head -c 32 classes.dex | xxd
 
       - name: Upload DEX artifact
         uses: actions/upload-artifact@v4
@@ -53,9 +74,3 @@ jobs:
           name: classes.dex
           path: classes.dex
           if-no-files-found: error
-
-      - name: Show DEX info
-        run: |
-          ls -lh classes.dex
-          file classes.dex
-          head -c 32 classes.dex | xxd
