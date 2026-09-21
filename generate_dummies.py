@@ -21,6 +21,10 @@ generate_dummies.py — GMS (com.google.android.gms) 用ダミー生成
   7. 1 ファイルの生成失敗が全体を止めない（try/except）
   8. 出力先の mkdir 失敗 / 書込失敗を明示的に扱う
   9. exit code を返す（CI 用）
+
+【今回の修正】
+  - AbstractServiceBroker の asBinder() オーバーライドを削除
+    （android.os.Binder#asBinder() は final のため @Override 不可）
 """
 
 import os
@@ -76,18 +80,17 @@ public interface IGmsServiceBroker {
 _HANDWRITTEN_AbstractServiceBroker = r'''package com.google.android.gms.common.internal;
 
 import android.os.Binder;
-import android.os.IBinder;
 
 /**
  * GMS 内部 AbstractServiceBroker（スタブ）。
  * DeprecatedServiceBroker の親クラスとして振る舞う。
+ *
+ * 注意:
+ *   android.os.Binder は IBinder を実装し、final な asBinder() を既に提供する。
+ *   したがって本クラスで asBinder() を再宣言してはならない
+ *   （final メソッドは @Override できない）。
  */
 public abstract class AbstractServiceBroker extends Binder implements IGmsServiceBroker {
-
-    @Override
-    public IBinder asBinder() {
-        return this;
-    }
 }
 '''
 
