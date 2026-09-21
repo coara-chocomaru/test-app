@@ -34,10 +34,6 @@ jobs:
         run: |
           python3 generate_dummies.py
 
-      - name: Copy custom SetBackupAccountActivity (overwrite generated one)
-        run: |
-          cp SetBackupAccountActivity.java src/com/google/android/backup/
-
       - name: Compile all Java files
         run: |
           ANDROID_JAR=$ANDROID_HOME/platforms/android-22/android.jar
