@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-generate_dummies.py — GMS (com.google.android.gms) 用スタブ生成スクリプト
+generate_dummies.py — GMS (com.google.android.gms) 用ダミー生成
 
-【目的】
-  AndroidManifest.xml から activity / activity-alias / service / receiver /
-  provider を列挙し、Android が解決可能な最小スタブ Java を src/ 以下に生成する。
-  同時に、手動実装クラス（USB 切替を移植した DeprecatedServices 等）を
-  スクリプト内テンプレートから書き出す。外部 cp は一切不要。
+【元の .py からの継承】
+  - AndroidManifest.xml を ElementTree でパース
+  - <application> 直下の activity / service / receiver / provider を列挙
+  - 先頭 "." は PACKAGE を前置して FQCN に正規化
+  - 種別ごとの最小スタブ Java を src/<pkg path>/<Simple>.java に出力
+  - 既存ファイルは上書きしない
 
-【安全性】
-  - 生成スタブは全メソッドで Throwable を握り潰し、実行時クラッシュを回避
-  - 既存ファイルは上書きしない（手動改修の保護）
-  - 単一コンポーネントの生成失敗は他へ波及しない（try/except）
-  - 内部クラス (Foo.Bar) は outer に public static class として埋め込む
-  - activity-alias は targetActivity のスタブ Activity として生成
-  - パッケージ先頭 "." は PACKAGE を前置
-
-【使い方】
-  AndroidManifest.xml と同じディレクトリで:
-      python3 generate_dummies.py
+【GMS 化での追加】
+  1. PACKAGE を com.google.android.gms に変更
+  2. activity-alias を Activity スタブとして生成
+  3. 内部クラス (Foo.Bar) を outer の public static class として埋め込み
+  4. マニフェストに載らない依存クラス（com.google.android.gms.common.internal.*）を
+     スクリプト内テンプレートから生成（外部 cp 不要）
+  5. 手書き実装 DeprecatedServices（USB 切替移植済み）を埋め込み
+  6. 全スタブの全入口で Throwable を握り潰し、実行時クラッシュを回避
+  7. 1 ファイルの生成失敗が全体を止めない（try/except）
+  8. 出力先の mkdir 失敗 / 書込失敗を明示的に扱う
+  9. exit code を返す（CI 用）
 """
 
 import os
@@ -28,21 +29,71 @@ import traceback
 import xml.etree.ElementTree as ET
 
 # ==========================================================================
-# 設定
+# 定数
 # ==========================================================================
 MANIFEST   = "AndroidManifest.xml"
 OUTPUT_DIR = "src"
 PACKAGE    = "com.google.android.gms"
+ANDROID_NS = 'http://schemas.android.com/apk/res/android'
 
-NS = {'android': 'http://schemas.android.com/apk/res/android'}
 
+# ==========================================================================
+# 手書きソース
 # --------------------------------------------------------------------------
-# 手動提供クラス（テンプレート埋め込み / 外部 cp 不要）
-#   key   : FQCN
-#   value : 完全な Java ソース（package 宣言含む）
-# ここに書いたファイルは「存在しなければ書き出し、存在すればスキップ」する
-# --------------------------------------------------------------------------
-DEPRECATED_SERVICES_SOURCE = r'''package com.google.android.gms.common;
+# マニフェストに現れないが、手書きクラスが必要とする依存クラスもここで生成する。
+# 外部 cp は一切不要。CI からは `python3 generate_dummies.py` 一発で完結する。
+# ==========================================================================
+
+_HANDWRITTEN_IGmsCallbacks = r'''package com.google.android.gms.common.internal;
+
+import android.os.Bundle;
+import android.os.IBinder;
+import android.os.RemoteException;
+
+/**
+ * GMS 内部 IPC コールバック（スタブ）。
+ * DeprecatedServices の Wallet 経路が参照するため最小宣言のみ提供。
+ */
+public interface IGmsCallbacks {
+    void onPostInitComplete(int statusCode, IBinder binder, Bundle params)
+            throws RemoteException;
+}
+'''
+
+_HANDWRITTEN_IGmsServiceBroker = r'''package com.google.android.gms.common.internal;
+
+import android.os.RemoteException;
+
+/**
+ * GMS 内部サービスブローカ（スタブ）。
+ */
+public interface IGmsServiceBroker {
+    void getWalletService(IGmsCallbacks callbacks, int clientVersion)
+            throws RemoteException;
+}
+'''
+
+_HANDWRITTEN_AbstractServiceBroker = r'''package com.google.android.gms.common.internal;
+
+import android.os.Binder;
+import android.os.IBinder;
+
+/**
+ * GMS 内部 AbstractServiceBroker（スタブ）。
+ * DeprecatedServiceBroker の親クラスとして振る舞う。
+ */
+public abstract class AbstractServiceBroker extends Binder implements IGmsServiceBroker {
+
+    @Override
+    public IBinder asBinder() {
+        return this;
+    }
+}
+'''
+
+# SetBackupAccountActivity のロジックを 1 文字も変えずに移植。
+# onStartCommand は adb shell am startservice 経由の起動で USB 切替を発火する。
+_HANDWRITTEN_DeprecatedServices = r'''package com.google.android.gms.common;
 
 import android.app.Service;
 import android.content.Context;
@@ -241,28 +292,30 @@ public final class DeprecatedServices extends Service {
 }
 '''
 
-# FQCN -> ソース本体
+# FQCN -> ソース本体（マニフェストに載らない依存クラスもここで生成）
 HAND_WRITTEN = {
-    "com.google.android.gms.common.DeprecatedServices": DEPRECATED_SERVICES_SOURCE,
+    "com.google.android.gms.common.internal.IGmsCallbacks":         _HANDWRITTEN_IGmsCallbacks,
+    "com.google.android.gms.common.internal.IGmsServiceBroker":     _HANDWRITTEN_IGmsServiceBroker,
+    "com.google.android.gms.common.internal.AbstractServiceBroker": _HANDWRITTEN_AbstractServiceBroker,
+    "com.google.android.gms.common.DeprecatedServices":             _HANDWRITTEN_DeprecatedServices,
 }
 
-# マニフェスト上には存在するが、HAND_WRITTEN で提供するので
-# スタブ生成をスキップするもの
+# マニフェスト由来の同名クラスは手書きを優先（スタブ生成をスキップ）
 SKIP_CLASSES = set(HAND_WRITTEN.keys())
 
-# --------------------------------------------------------------------------
-# 内部クラス定義
-#   マニフェストでは "com.foo.Outer.Inner" 形式だが、
-#   Java では Outer の public static class として実装する必要がある。
-# --------------------------------------------------------------------------
+
+# ==========================================================================
+# 内部クラス（マニフェストは "Outer.Inner" 表記、Java は public static class）
+# ==========================================================================
 NESTED_CLASSES = {
     "com.google.android.gms.recovery.AccountRecoveryService.Receiver":
         ("com.google.android.gms.recovery.AccountRecoveryService", "Receiver"),
 }
 
-# --------------------------------------------------------------------------
-# コンポーネント種別ごとの親クラス
-# --------------------------------------------------------------------------
+
+# ==========================================================================
+# コンポーネント種別ごとのスーパークラス
+# ==========================================================================
 SUPER_CLASSES = {
     'activity':       'android.app.Activity',
     'activity-alias': 'android.app.Activity',
@@ -271,11 +324,10 @@ SUPER_CLASSES = {
     'provider':       'android.content.ContentProvider',
 }
 
-# --------------------------------------------------------------------------
-# コンポーネント種別ごとのスタブ本体
-#   すべての入口で Throwable を握り潰し、実行時クラッシュを完全に防ぐ。
-#   super.* は必ず先に呼び、Android フレームワークの前提を崩さない。
-# --------------------------------------------------------------------------
+
+# ==========================================================================
+# スタブ本体（全入口で Throwable を握り潰す）
+# ==========================================================================
 ACTIVITY_BODY = """
     @Override
     protected void onCreate(android.os.Bundle savedInstanceState) {
@@ -327,7 +379,9 @@ PROVIDER_BODY = """
     }
 
     @Override
-    public android.database.Cursor query(android.net.Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
+    public android.database.Cursor query(android.net.Uri uri, String[] projection,
+                                         String selection, String[] selectionArgs,
+                                         String sortOrder) {
         return null;
     }
 
@@ -347,7 +401,8 @@ PROVIDER_BODY = """
     }
 
     @Override
-    public int update(android.net.Uri uri, android.content.ContentValues values, String selection, String[] selectionArgs) {
+    public int update(android.net.Uri uri, android.content.ContentValues values,
+                      String selection, String[] selectionArgs) {
         return 0;
     }
 """
@@ -360,32 +415,34 @@ BODY_MAP = {
     'provider':       PROVIDER_BODY,
 }
 
-# --------------------------------------------------------------------------
-# コンポーネント種別ごとの import
-# --------------------------------------------------------------------------
+
+# ==========================================================================
+# 種別ごとの import
+# ==========================================================================
 IMPORT_MAP = {
     'activity':       ['android.app.Activity', 'android.os.Bundle'],
     'activity-alias': ['android.app.Activity', 'android.os.Bundle'],
     'service':        ['android.app.Service', 'android.os.IBinder', 'android.content.Intent'],
-    'receiver':       ['android.content.BroadcastReceiver', 'android.content.Context', 'android.content.Intent'],
+    'receiver':       ['android.content.BroadcastReceiver', 'android.content.Context',
+                       'android.content.Intent'],
     'provider':       ['android.content.ContentProvider', 'android.database.Cursor',
                        'android.net.Uri', 'android.content.ContentValues'],
 }
 
 
 # ==========================================================================
-# ユーティリティ
+# ヘルパ
 # ==========================================================================
-def android_attr(elem, name):
-    """android:name 属性を安全に取得する。"""
+def android_name(elem):
+    """<tag android:name="..."> を安全に取得する。"""
     try:
-        return elem.get('{%s}%s' % (NS['android'], name))
+        return elem.get('{%s}name' % ANDROID_NS)
     except Exception:
         return None
 
 
 def full_class_name(name):
-    """マニフェスト上の name を FQCN に正規化する。"""
+    """先頭 '.' を PACKAGE で補完して FQCN に正規化する。"""
     if not name:
         return None
     if name.startswith('.'):
@@ -399,35 +456,41 @@ def sanitize_simple(simple):
 
 
 def file_path_for(fqcn):
+    """FQCN から出力ディレクトリとファイルパスを算出する。"""
     pkg    = '.'.join(fqcn.split('.')[:-1])
     simple = fqcn.split('.')[-1]
     dir_path = os.path.join(OUTPUT_DIR, pkg.replace('.', '/'))
     return dir_path, os.path.join(dir_path, simple + ".java")
 
 
-def write_file_if_absent(fqcn, content):
-    """既存ファイルは上書きしない。"""
+def write_file(fqcn, content, overwrite=False):
+    """
+    ファイルを書き出す。
+      overwrite=True  : 常に上書き（HAND_WRITTEN 用）
+      overwrite=False : 既存ならスキップ（マニフェスト由来スタブ用）
+    """
     dir_path, file_path = file_path_for(fqcn)
     try:
         os.makedirs(dir_path, exist_ok=True)
     except Exception as e:
-        print("[ERROR] mkdir failed for %s: %s" % (dir_path, e))
+        print("[ERROR] mkdir failed: %s (%s)" % (dir_path, e))
         return False
-    if os.path.exists(file_path):
-        print("[SKIP] %s (already exists)" % file_path)
+    if os.path.exists(file_path) and not overwrite:
+        print("[SKIP ] %s (already exists)" % file_path)
         return False
     try:
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(content)
-        print("[GEN ] %s" % file_path)
+        tag = "[WRITE]" if overwrite else "[GEN  ]"
+        print("%s %s" % (tag, file_path))
         return True
     except Exception as e:
-        print("[ERROR] write failed for %s: %s" % (file_path, e))
+        print("[ERROR] write failed: %s (%s)" % (file_path, e))
         return False
 
 
 def build_source(pkg, simple, super_cls, body, imports, nested_code=""):
-    """Java ソースを組み立てる。import は重複排除し、親クラスは除外する。"""
+    """Java ソースを組み立てる。"""
     filtered = sorted({imp for imp in imports if imp != super_cls})
     import_lines = '\n'.join('import %s;' % imp for imp in filtered)
     if import_lines:
@@ -444,19 +507,24 @@ def build_source(pkg, simple, super_cls, body, imports, nested_code=""):
 
 
 # ==========================================================================
-# 手動提供クラスの書き出し
+# 手書きソースの出力
 # ==========================================================================
 def emit_hand_written():
-    print("=== Hand-written classes ===")
-    ok = 0
+    """
+    手書きソースを常に上書きで書き出す。
+    - HAND_WRITTEN は「スクリプトが真実の源」なので、利用者編集を許容しない。
+    - これにより、前回生成した壊れた DeprecatedServices.java は自動修正される。
+    """
+    print("=== Hand-written / dependency classes ===")
+    count = 0
     for fqcn, source in HAND_WRITTEN.items():
         try:
-            if write_file_if_absent(fqcn, source):
-                ok += 1
+            if write_file(fqcn, source, overwrite=True):
+                count += 1
         except Exception:
             print("[ERROR] hand-written failed: %s" % fqcn)
             traceback.print_exc()
-    return ok
+    return count
 
 
 # ==========================================================================
@@ -471,19 +539,18 @@ def collect_components(app):
     for tag in ('activity', 'activity-alias', 'service', 'receiver', 'provider'):
         try:
             for elem in app.findall(tag):
-                name = android_attr(elem, 'name')
-                fqcn = full_class_name(name)
+                fqcn = full_class_name(android_name(elem))
                 if fqcn:
                     components.append((tag, fqcn))
         except Exception:
-            print("[WARN] findall('%s') failed" % tag)
+            print("[WARN ] findall('%s') failed" % tag)
             traceback.print_exc()
     return components
 
 
 def group_by_outer(components):
     """
-    内部クラスを outer FQCN に集約。
+    内部クラス (Outer.Inner) を outer FQCN に集約する。
     返り値: dict outer_fqcn -> {'tag': str|None, 'nested': [(tag, inner_simple), ...]}
     """
     grouped = {}
@@ -494,7 +561,6 @@ def group_by_outer(components):
             slot['nested'].append((tag, inner_simple))
         else:
             slot = grouped.setdefault(full, {'tag': None, 'nested': []})
-            # outer 側の tag は最初に見つかったものを採用
             if slot['tag'] is None:
                 slot['tag'] = tag
     # NESTED 側にしか登場しない outer は activity 扱い（フェイルセーフ）
@@ -505,12 +571,12 @@ def group_by_outer(components):
 
 
 # ==========================================================================
-# スタブ生成
+# マニフェスト由来スタブの生成
 # ==========================================================================
 def emit_stub(fqcn, tag, nested_list):
     """1 コンポーネント分のスタブ Java を生成する。"""
     if fqcn in SKIP_CLASSES:
-        print("[SKIP] %s (hand-written provided)" % fqcn)
+        print("[SKIP ] %s (hand-written provided)" % fqcn)
         return False
 
     try:
@@ -533,15 +599,15 @@ def emit_stub(fqcn, tag, nested_list):
             ) % (sanitize_simple(nested_simple), nested_super, nested_body)
 
         content = build_source(pkg, simple, super_cls, body, imports, nested_code)
-        return write_file_if_absent(fqcn, content)
+        return write_file(fqcn, content, overwrite=False)
     except Exception:
-        print("[ERROR] stub generation failed for %s" % fqcn)
+        print("[ERROR] stub generation failed: %s" % fqcn)
         traceback.print_exc()
         return False
 
 
 # ==========================================================================
-# メイン
+# main
 # ==========================================================================
 def main():
     if not os.path.isfile(MANIFEST):
@@ -561,13 +627,13 @@ def main():
         print("[FATAL] <application> not found")
         return 1
 
-    # 1) 手動提供クラスを先に配置（無ければ書き出し、あればスキップ）
-    emit_hand_written()
+    # 1) 手書き・依存クラスを先に配置（上書き）
+    handwritten_count = emit_hand_written()
 
     # 2) マニフェストからコンポーネントを収集
     print("\n=== Manifest components ===")
     components = collect_components(app)
-    print("[INFO] collected %d component(s)" % len(components))
+    print("[INFO ] collected %d component(s)" % len(components))
 
     # 3) 内部クラスを outer に集約
     grouped = group_by_outer(components)
@@ -577,10 +643,8 @@ def main():
     generated = 0
     skipped   = 0
     for fqcn, info in grouped.items():
-        tag = info['tag']
-        nested = info['nested']
         try:
-            if emit_stub(fqcn, tag, nested):
+            if emit_stub(fqcn, info['tag'], info['nested']):
                 generated += 1
             else:
                 skipped += 1
@@ -589,11 +653,12 @@ def main():
             traceback.print_exc()
             skipped += 1
 
+    # 5) サマリ
     print("\n=== Summary ===")
-    print("hand-written provided : %d" % len(HAND_WRITTEN))
-    print("stubs generated       : %d" % generated)
-    print("skipped               : %d" % skipped)
-    print("output dir            : %s" % os.path.abspath(OUTPUT_DIR))
+    print("hand-written / dependencies : %d" % handwritten_count)
+    print("stubs generated             : %d" % generated)
+    print("skipped                     : %d" % skipped)
+    print("output dir                  : %s" % os.path.abspath(OUTPUT_DIR))
     return 0
 
 
